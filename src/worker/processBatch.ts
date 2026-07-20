@@ -25,20 +25,6 @@ interface ClaimedRow {
   payload: unknown;
 }
 
-interface ParsedOk {
-  id: number;
-  attempt_count: number;
-  kind: "ok";
-  parsed: ReturnType<typeof parseOtelPayload>;
-}
-
-interface ParsedErr {
-  id: number;
-  attempt_count: number;
-  kind: "err";
-  error: string;
-}
-
 async function reapStaleProcessing(db: Kysely<Database>): Promise<void> {
   const staleThreshold = new Date(Date.now() - 5 * 60 * 1000);
   await db
@@ -97,7 +83,7 @@ async function claimBatch(
 }
 
 async function handleFailure(
-  trx: Kysely<Database>,
+  db: Kysely<Database>,
   id: number,
   attemptCount: number,
   error: string,
@@ -106,7 +92,7 @@ async function handleFailure(
   const newAttemptCount = attemptCount + 1;
 
   if (newAttemptCount >= deps.maxAttempts) {
-    await trx
+    await db
       .updateTable("raw_events")
       .set({
         processing_status: "failed",
@@ -121,7 +107,7 @@ async function handleFailure(
       deps.backoffBaseMs * Math.pow(2, newAttemptCount - 1),
       deps.backoffMaxMs,
     );
-    await trx
+    await db
       .updateTable("raw_events")
       .set({
         processing_status: "pending",
@@ -144,42 +130,30 @@ export async function processBatch(
   const claimed = await claimBatch(db, deps.batchSize);
   if (claimed.length === 0) return { processed: 0, failed: 0 };
 
-  const results: (ParsedOk | ParsedErr)[] = claimed.map((row) => {
+  let processed = 0;
+  let failed = 0;
+
+  for (const row of claimed) {
+    let parsed: ReturnType<typeof parseOtelPayload>;
     try {
-      const parsed = parseOtelPayload(row.payload);
-      return {
-        id: row.id,
-        attempt_count: row.attempt_count,
-        kind: "ok",
-        parsed,
-      };
+      parsed = parseOtelPayload(row.payload);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error({ id: row.id, err: message }, "parse failed");
-      return {
-        id: row.id,
-        attempt_count: row.attempt_count,
-        kind: "err",
-        error: message,
-      };
+      try {
+        await handleFailure(db, row.id, row.attempt_count, message, deps);
+      } catch (err2) {
+        logger.error({ id: row.id, err: err2 }, "handleFailure failed");
+      }
+      failed++;
+      continue;
     }
-  });
 
-  return db.transaction().execute(async (trx) => {
-    let processed = 0;
-    let failed = 0;
-
-    for (const result of results) {
-      if (result.kind === "err") {
-        await handleFailure(
-          trx,
-          result.id,
-          result.attempt_count,
-          result.error,
-          deps,
-        );
-        failed++;
-      } else if (result.parsed.length === 0) {
+    try {
+      await db.transaction().execute(async (trx) => {
+        if (parsed.length > 0) {
+          await storeParsedTraces(trx, row.id, parsed);
+        }
         await trx
           .updateTable("raw_events")
           .set({
@@ -188,38 +162,21 @@ export async function processBatch(
             processing_error: null,
             next_attempt_at: null,
           })
-          .where("id", "=", result.id)
+          .where("id", "=", row.id)
           .execute();
-        processed++;
-      } else {
-        try {
-          await storeParsedTraces(trx, result.id, result.parsed);
-          await trx
-            .updateTable("raw_events")
-            .set({
-              processing_status: "processed",
-              processed_at: new Date(),
-              processing_error: null,
-              next_attempt_at: null,
-            })
-            .where("id", "=", result.id)
-            .execute();
-          processed++;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          logger.error({ id: result.id, err: message }, "store failed");
-          await handleFailure(
-            trx,
-            result.id,
-            result.attempt_count,
-            message,
-            deps,
-          );
-          failed++;
-        }
+      });
+      processed++;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error({ id: row.id, err: message }, "store failed");
+      try {
+        await handleFailure(db, row.id, row.attempt_count, message, deps);
+      } catch (err2) {
+        logger.error({ id: row.id, err: err2 }, "handleFailure failed");
       }
+      failed++;
     }
+  }
 
-    return { processed, failed };
-  });
+  return { processed, failed };
 }

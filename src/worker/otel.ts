@@ -146,7 +146,7 @@ function tryParseJson(raw: unknown): unknown {
     try {
       return JSON.parse(raw);
     } catch {
-      return raw;
+      return JSON.stringify(raw);
     }
   }
   return raw;

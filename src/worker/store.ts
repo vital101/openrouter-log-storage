@@ -3,6 +3,11 @@ import { sql } from "kysely";
 import type { Database } from "../types.js";
 import type { ParsedPayload } from "./otel.js";
 
+function forJsonb(value: unknown): unknown {
+  if (Array.isArray(value)) return JSON.stringify(value);
+  return value;
+}
+
 export async function storeParsedTraces(
   db: Kysely<Database>,
   rawEventId: number,
@@ -16,8 +21,8 @@ export async function storeParsedTraces(
         otel_trace_id: p.trace.otelTraceId,
         service_name: p.trace.serviceName,
         trace_name: p.trace.traceName,
-        tags: p.trace.tags,
-        metadata: p.trace.metadata,
+        tags: forJsonb(p.trace.tags),
+        metadata: forJsonb(p.trace.metadata),
         session_id: p.trace.sessionId,
         user_id: p.trace.userId,
         entity_id: p.trace.entityId,
@@ -79,7 +84,7 @@ export async function storeParsedTraces(
       response_model: g.responseModel,
       response_id: g.responseId,
       finish_reason: g.finishReason,
-      finish_reasons: g.finishReasons,
+      finish_reasons: forJsonb(g.finishReasons),
       temperature: g.temperature,
       max_tokens: g.maxTokens,
       top_p: g.topP,
@@ -95,9 +100,9 @@ export async function storeParsedTraces(
       total_cost: g.totalCost,
       input_unit_price: p.trace.inputUnitPrice,
       output_unit_price: p.trace.outputUnitPrice,
-      prompt: g.prompt,
-      completion: g.completion,
-      raw_attributes: g.rawAttributes,
+      prompt: forJsonb(g.prompt),
+      completion: forJsonb(g.completion),
+      raw_attributes: forJsonb(g.rawAttributes),
     }));
   });
 
