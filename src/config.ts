@@ -2,7 +2,7 @@ import path from "node:path";
 import { z } from "zod";
 
 const envSchema = z.object({
-  PORT: z.coerce.number().int().positive().default(3000),
+  PORT: z.coerce.number().int().nonnegative().default(3000),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   WEBHOOK_SECRET: z.string().min(1, "WEBHOOK_SECRET is required"),
   WEBHOOK_SECRET_HEADER: z.string().min(1).default("X-Webhook-Signature"),

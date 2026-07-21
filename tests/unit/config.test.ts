@@ -50,12 +50,12 @@ describe("loadConfig", () => {
     expect(() => loadConfig()).toThrow(/LOG_LEVEL/);
   });
 
-  it("throws for PORT=0", async () => {
+  it("accepts PORT=0 (Dokku sets PORT=0 for non-web processes)", async () => {
     vi.stubEnv("DATABASE_URL", "postgres://x");
     vi.stubEnv("WEBHOOK_SECRET", "s");
     vi.stubEnv("PORT", "0");
     const loadConfig = await freshLoadConfig();
-    expect(() => loadConfig()).toThrow();
+    expect(loadConfig().PORT).toBe(0);
   });
 
   it("throws for PORT=-1", async () => {
