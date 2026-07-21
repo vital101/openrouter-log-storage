@@ -1,19 +1,22 @@
-import express from "express";
+import express, { type Express } from "express";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
-import { loadConfig } from "./config.js";
+import type { Logger } from "pino";
+import type { Kysely } from "kysely";
+import { loadConfig, type Config } from "./config.js";
 import { createDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { healthRouter } from "./routes/health.js";
 import { webhookRouter } from "./routes/webhook.js";
 import { webhookAuth } from "./middleware/webhookAuth.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import type { Database } from "./types.js";
 
-async function main() {
-  const config = loadConfig();
-  const logger = createLogger(config.LOG_LEVEL);
-  const db = createDb(config.DATABASE_URL);
-
+export function createApp(
+  db: Kysely<Database>,
+  config: Config,
+  logger: Logger,
+): Express {
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet());
@@ -27,6 +30,15 @@ async function main() {
   );
 
   app.use(errorHandler);
+
+  return app;
+}
+
+async function main() {
+  const config = loadConfig();
+  const logger = createLogger(config.LOG_LEVEL);
+  const db = createDb(config.DATABASE_URL);
+  const app = createApp(db, config, logger);
 
   const server = app.listen(config.PORT, () => {
     logger.info({ port: config.PORT }, "server listening");

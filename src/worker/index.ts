@@ -1,17 +1,29 @@
-import { loadConfig } from "../config.js";
+import type { Kysely } from "kysely";
+import type { Logger } from "pino";
+import { loadConfig, type Config } from "../config.js";
 import { createDb } from "../db.js";
 import { createLogger } from "../logger.js";
 import { processBatch } from "./processBatch.js";
+import type { Database } from "../types.js";
 
-async function main() {
-  const config = loadConfig();
-  const logger = createLogger(config.LOG_LEVEL).child({ component: "worker" });
-  const db = createDb(config.DATABASE_URL);
+export interface StartWorkerLoopOptions {
+  db: Kysely<Database>;
+  logger: Logger;
+  config: Config;
+}
+
+export interface WorkerLoopHandle {
+  tick: () => Promise<void>;
+  stop: () => Promise<void>;
+}
+
+export function startWorkerLoop(opts: StartWorkerLoopOptions): WorkerLoopHandle {
+  const { db, logger, config } = opts;
 
   let running = true;
   let inFlight = false;
 
-  const tick = async () => {
+  const tick = async (): Promise<void> => {
     if (!running || inFlight) return;
     inFlight = true;
     try {
@@ -35,15 +47,31 @@ async function main() {
     }
   };
 
-  const intervalId = setInterval(tick, config.WORKER_POLL_INTERVAL_MS);
+  const intervalId = setInterval(() => {
+    void tick();
+  }, config.WORKER_POLL_INTERVAL_MS);
 
-  const shutdown = async (signal: string) => {
-    logger.info({ signal }, "worker shutdown started");
+  const stop = async (): Promise<void> => {
     running = false;
     clearInterval(intervalId);
     while (inFlight) {
       await new Promise((r) => setTimeout(r, 100));
     }
+  };
+
+  return { tick, stop };
+}
+
+async function main() {
+  const config = loadConfig();
+  const logger = createLogger(config.LOG_LEVEL).child({ component: "worker" });
+  const db = createDb(config.DATABASE_URL);
+
+  const { stop } = startWorkerLoop({ db, logger, config });
+
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, "worker shutdown started");
+    await stop();
     try {
       await db.destroy();
     } catch (err) {
@@ -53,8 +81,8 @@ async function main() {
     process.exit(0);
   };
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
 
   logger.info(
     {

@@ -25,6 +25,21 @@ interface ClaimedRow {
   payload: unknown;
 }
 
+export function computeBackoffMs(
+  attemptCount: number,
+  baseMs: number,
+  maxMs: number,
+): number {
+  return Math.min(baseMs * Math.pow(2, attemptCount - 1), maxMs);
+}
+
+export function shouldFailAfter(
+  attemptCount: number,
+  maxAttempts: number,
+): boolean {
+  return attemptCount >= maxAttempts;
+}
+
 async function reapStaleProcessing(db: Kysely<Database>): Promise<void> {
   const staleThreshold = new Date(Date.now() - 5 * 60 * 1000);
   await db
@@ -91,7 +106,7 @@ async function handleFailure(
 ): Promise<void> {
   const newAttemptCount = attemptCount + 1;
 
-  if (newAttemptCount >= deps.maxAttempts) {
+  if (shouldFailAfter(newAttemptCount, deps.maxAttempts)) {
     await db
       .updateTable("raw_events")
       .set({
@@ -103,8 +118,9 @@ async function handleFailure(
       .where("id", "=", id)
       .execute();
   } else {
-    const backoffMs = Math.min(
-      deps.backoffBaseMs * Math.pow(2, newAttemptCount - 1),
+    const backoffMs = computeBackoffMs(
+      newAttemptCount,
+      deps.backoffBaseMs,
       deps.backoffMaxMs,
     );
     await db

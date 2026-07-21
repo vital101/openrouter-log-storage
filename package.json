@@ -6,11 +6,17 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "dev:worker": "tsx watch src/worker/index.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "start:worker": "node dist/worker/index.js",
     "migrate": "tsx src/migrate.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "vitest run --project e2e"
   },
   "dependencies": {
     "express": "^5.2.1",
@@ -19,17 +25,26 @@
     "pg": "^8.22.0",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
+    "tsx": "^4.23.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^12.0.4",
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.1",
     "@types/pg": "^8.20.0",
-    "tsx": "^4.23.1",
-    "typescript": "^7.0.2"
+    "@types/supertest": "^7.2.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "supertest": "^7.2.2",
+    "testcontainers": "^12.0.4",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
-    "fsevents@2.3.3": true
+    "fsevents@2.3.3": true,
+    "cpu-features@0.0.10": true,
+    "protobufjs@7.6.5": true,
+    "ssh2@1.17.0": true
   }
 }

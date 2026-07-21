@@ -3,7 +3,7 @@ import { sql } from "kysely";
 import type { Database } from "../types.js";
 import type { ParsedPayload } from "./otel.js";
 
-function forJsonb(value: unknown): unknown {
+export function forJsonb(value: unknown): unknown {
   if (Array.isArray(value)) return JSON.stringify(value);
   return value;
 }

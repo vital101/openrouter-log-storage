@@ -67,6 +67,7 @@ function getAttrValue(
   if (!value) return null;
 
   if (typeof value.stringValue === "string") return value.stringValue;
+  if (typeof value.intValue === "number") return value.intValue;
   if (typeof value.intValue === "string") return Number(value.intValue);
   if (typeof value.doubleValue === "number") return value.doubleValue;
   if (typeof value.boolValue === "boolean") return value.boolValue;
@@ -185,53 +186,12 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
       (resource?.attributes as unknown[]) ?? [],
     );
 
-    const sessionId = (resourceAttrs["session.id"] as string) ?? null;
-    const userId = (resourceAttrs["user.id"] as string) ?? null;
-    const openrouterTraceIdRaw = resourceAttrs["openrouter.trace.id"];
-    const traceName = (resourceAttrs["trace.name"] as string) ?? null;
-    const serviceName = (resourceAttrs["service.name"] as string) ?? null;
-    const tagsRaw = resourceAttrs["trace.tags"];
-    const tags = typeof tagsRaw === "string" ? tryParseJson(tagsRaw) : tagsRaw;
-
-    const entityId =
-      (resourceAttrs["trace.metadata.openrouter.entity_id"] as string) ?? null;
-    const apiKeyName =
-      (resourceAttrs["trace.metadata.openrouter.api_key_name"] as string) ??
-      null;
-    const providerName =
-      (resourceAttrs["trace.metadata.openrouter.provider_name"] as string) ??
-      null;
-    const providerSlug =
-      (resourceAttrs["trace.metadata.openrouter.provider_slug"] as string) ??
-      null;
-    const environment =
-      (resourceAttrs["trace.metadata.environment"] as string) ?? null;
-    const source =
-      (resourceAttrs["trace.metadata.source"] as string) ?? null;
-
-    const inputUnitPrice =
-      coerceNumber(
-        resourceAttrs["trace.metadata.openrouter.input_unit_price"],
-      ) ?? null;
-    const outputUnitPrice =
-      coerceNumber(
-        resourceAttrs["trace.metadata.openrouter.output_unit_price"],
-      ) ?? null;
-
-    const metadata = buildMetadata(resourceAttrs);
-
-    let openrouterTraceId: string;
-    if (typeof openrouterTraceIdRaw === "string" && openrouterTraceIdRaw) {
-      openrouterTraceId = openrouterTraceIdRaw;
-    } else {
-      openrouterTraceId = "";
-    }
-
     const scopeSpans = resourceSpan.scopeSpans;
     if (!Array.isArray(scopeSpans)) continue;
 
     const generations: ParsedGeneration[] = [];
     let firstOtelTraceId: string | null = null;
+    let firstSpanAttrs: Record<string, unknown> | null = null;
 
     for (const ss of scopeSpans) {
       if (!ss || typeof ss !== "object") continue;
@@ -265,6 +225,10 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
         const spanAttrs = flattenAttributes(
           (s.attributes as unknown[]) ?? [],
         );
+
+        if (firstSpanAttrs === null) {
+          firstSpanAttrs = spanAttrs;
+        }
 
         const operationName =
           (spanAttrs["gen_ai.operation.name"] as string) ?? null;
@@ -375,20 +339,48 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
       }
     }
 
-    if (!openrouterTraceId) {
+    const traceAttrs = { ...(firstSpanAttrs ?? {}), ...resourceAttrs };
+
+    const openrouterTraceIdRaw = traceAttrs["openrouter.trace.id"];
+    let openrouterTraceId: string;
+    if (typeof openrouterTraceIdRaw === "string" && openrouterTraceIdRaw) {
+      openrouterTraceId = openrouterTraceIdRaw;
+    } else {
       openrouterTraceId = firstOtelTraceId ?? `unknown-${crypto.randomUUID()}`;
     }
 
-    const finalSessionId =
-      sessionId ??
-      (generations.length > 0
-        ? (generations[0]!.rawAttributes["session.id"] as string) ?? null
-        : null);
-    const finalUserId =
-      userId ??
-      (generations.length > 0
-        ? (generations[0]!.rawAttributes["user.id"] as string) ?? null
-        : null);
+    const sessionId = (traceAttrs["session.id"] as string) ?? null;
+    const userId = (traceAttrs["user.id"] as string) ?? null;
+    const traceName = (traceAttrs["trace.name"] as string) ?? null;
+    const serviceName = (traceAttrs["service.name"] as string) ?? null;
+    const tagsRaw = traceAttrs["trace.tags"];
+    const tags = typeof tagsRaw === "string" ? tryParseJson(tagsRaw) : tagsRaw;
+
+    const entityId =
+      (traceAttrs["trace.metadata.openrouter.entity_id"] as string) ?? null;
+    const apiKeyName =
+      (traceAttrs["trace.metadata.openrouter.api_key_name"] as string) ??
+      null;
+    const providerName =
+      (traceAttrs["trace.metadata.openrouter.provider_name"] as string) ??
+      null;
+    const providerSlug =
+      (traceAttrs["trace.metadata.openrouter.provider_slug"] as string) ??
+      null;
+    const environment =
+      (traceAttrs["trace.metadata.environment"] as string) ?? null;
+    const source = (traceAttrs["trace.metadata.source"] as string) ?? null;
+
+    const inputUnitPrice =
+      coerceNumber(
+        traceAttrs["trace.metadata.openrouter.input_unit_price"],
+      ) ?? null;
+    const outputUnitPrice =
+      coerceNumber(
+        traceAttrs["trace.metadata.openrouter.output_unit_price"],
+      ) ?? null;
+
+    const metadata = buildMetadata(traceAttrs);
 
     const trace: ParsedTrace = {
       openrouterTraceId,
@@ -397,8 +389,8 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
       traceName,
       tags,
       metadata,
-      sessionId: finalSessionId,
-      userId: finalUserId,
+      sessionId,
+      userId,
       entityId,
       apiKeyName,
       providerName,
