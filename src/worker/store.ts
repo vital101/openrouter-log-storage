@@ -1,11 +1,39 @@
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 import type { Database } from "../types.js";
-import type { ParsedPayload } from "./otel.js";
+import type { ParsedGeneration, ParsedPayload, ParsedTrace } from "./otel.js";
 
 export function forJsonb(value: unknown): unknown {
   if (Array.isArray(value)) return JSON.stringify(value);
   return value;
+}
+
+interface CoalescedTrace {
+  trace: ParsedTrace;
+  generations: Map<string, ParsedGeneration>;
+}
+
+function coalesceByOpenrouterTraceId(parsed: ParsedPayload[]): CoalescedTrace[] {
+  const byId = new Map<string, CoalescedTrace>();
+  for (const p of parsed) {
+    const id = p.trace.openrouterTraceId;
+    const existing = byId.get(id);
+    if (existing) {
+      existing.trace = { ...existing.trace, ...p.trace };
+      for (const g of p.generations) {
+        if (!existing.generations.has(g.spanId)) {
+          existing.generations.set(g.spanId, g);
+        }
+      }
+    } else {
+      const generations = new Map<string, ParsedGeneration>();
+      for (const g of p.generations) {
+        generations.set(g.spanId, g);
+      }
+      byId.set(id, { trace: p.trace, generations });
+    }
+  }
+  return [...byId.values()];
 }
 
 export async function storeParsedTraces(
@@ -13,24 +41,29 @@ export async function storeParsedTraces(
   rawEventId: number,
   parsed: ParsedPayload[],
 ): Promise<void> {
+  if (parsed.length === 0) return;
+
+  const coalesced = coalesceByOpenrouterTraceId(parsed);
+  const traces = coalesced.map((c) => c.trace);
+
   const traceRows = await db
     .insertInto("traces")
     .values(
-      parsed.map((p) => ({
-        openrouter_trace_id: p.trace.openrouterTraceId,
-        otel_trace_id: p.trace.otelTraceId,
-        service_name: p.trace.serviceName,
-        trace_name: p.trace.traceName,
-        tags: forJsonb(p.trace.tags),
-        metadata: forJsonb(p.trace.metadata),
-        session_id: p.trace.sessionId,
-        user_id: p.trace.userId,
-        entity_id: p.trace.entityId,
-        api_key_name: p.trace.apiKeyName,
-        provider_name: p.trace.providerName,
-        provider_slug: p.trace.providerSlug,
-        environment: p.trace.environment,
-        source: p.trace.source,
+      traces.map((t) => ({
+        openrouter_trace_id: t.openrouterTraceId,
+        otel_trace_id: t.otelTraceId,
+        service_name: t.serviceName,
+        trace_name: t.traceName,
+        tags: forJsonb(t.tags),
+        metadata: forJsonb(t.metadata),
+        session_id: t.sessionId,
+        user_id: t.userId,
+        entity_id: t.entityId,
+        api_key_name: t.apiKeyName,
+        provider_name: t.providerName,
+        provider_slug: t.providerSlug,
+        environment: t.environment,
+        source: t.source,
         received_at: new Date(),
         raw_event_id: rawEventId,
       })),
@@ -61,11 +94,10 @@ export async function storeParsedTraces(
     traceIdMap.set(row.openrouter_trace_id, row.id);
   }
 
-  const genValues = parsed.flatMap((p) => {
-    const traceId = traceIdMap.get(p.trace.openrouterTraceId);
+  const genValues = coalesced.flatMap((c) => {
+    const traceId = traceIdMap.get(c.trace.openrouterTraceId);
     if (!traceId) return [];
-
-    return p.generations.map((g) => ({
+    return [...c.generations.values()].map((g) => ({
       trace_id: traceId,
       span_id: g.spanId,
       otel_trace_id: g.otelTraceId,
@@ -98,8 +130,8 @@ export async function storeParsedTraces(
       input_cost: g.inputCost,
       output_cost: g.outputCost,
       total_cost: g.totalCost,
-      input_unit_price: p.trace.inputUnitPrice,
-      output_unit_price: p.trace.outputUnitPrice,
+      input_unit_price: c.trace.inputUnitPrice,
+      output_unit_price: c.trace.outputUnitPrice,
       prompt: forJsonb(g.prompt),
       completion: forJsonb(g.completion),
       raw_attributes: forJsonb(g.rawAttributes),

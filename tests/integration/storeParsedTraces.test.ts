@@ -138,4 +138,77 @@ describe("storeParsedTraces", () => {
       .execute();
     expect(generations).toHaveLength(3);
   });
+
+  it("coalesces two parsed payloads that share an openrouter_trace_id into one trace row", async () => {
+    const db = getTestDb();
+    const rawEventId = await seedRawEvent({});
+    const parsed = [
+      ...makeParsedTraceFor("or-shared", ["span-A"]),
+      ...makeParsedTraceFor("or-shared", ["span-B"]),
+    ];
+    await storeParsedTraces(db, rawEventId, parsed);
+
+    const traces = await db
+      .selectFrom("traces")
+      .selectAll()
+      .execute();
+    expect(traces).toHaveLength(1);
+    expect(traces[0]?.openrouter_trace_id).toBe("or-shared");
+
+    const generations = await db
+      .selectFrom("llm_generations")
+      .select(["span_id"])
+      .orderBy("span_id", "asc")
+      .execute();
+    expect(generations.map((g) => g.span_id)).toEqual(["span-A", "span-B"]);
+  });
+
+  it("deduplicates spans that share a span_id within a coalesced group (first wins)", async () => {
+    const db = getTestDb();
+    const rawEventId = await seedRawEvent({});
+    const parsed = [
+      ...makeParsedTraceFor("or-dup-spans", ["span-X"]),
+      ...makeParsedTraceFor("or-dup-spans", ["span-X", "span-Y"]),
+    ];
+    await storeParsedTraces(db, rawEventId, parsed);
+
+    const generations = await db
+      .selectFrom("llm_generations")
+      .select(["span_id"])
+      .orderBy("span_id", "asc")
+      .execute();
+    expect(generations.map((g) => g.span_id)).toEqual(["span-X", "span-Y"]);
+  });
+
+  it("later payloads' top-level trace fields win when coalesced", async () => {
+    const db = getTestDb();
+    const rawEventId = await seedRawEvent({});
+    const parsed = [
+      ...makeParsedTraceFor("or-merge", ["span-A"]),
+    ];
+    if (parsed[0]) {
+      parsed[0].trace.environment = "first";
+    }
+    const parsed2 = [...makeParsedTraceFor("or-merge", ["span-B"])];
+    if (parsed2[0]) {
+      parsed2[0].trace.environment = "second";
+    }
+    await storeParsedTraces(db, rawEventId, [...parsed, ...parsed2]);
+
+    const trace = await db
+      .selectFrom("traces")
+      .select(["environment"])
+      .where("openrouter_trace_id", "=", "or-merge")
+      .executeTakeFirstOrThrow();
+    expect(trace.environment).toBe("second");
+  });
+
+  it("is a no-op when parsed is empty", async () => {
+    const db = getTestDb();
+    const rawEventId = await seedRawEvent({});
+    await expect(storeParsedTraces(db, rawEventId, [])).resolves.toBeUndefined();
+
+    const traces = await db.selectFrom("traces").selectAll().execute();
+    expect(traces).toHaveLength(0);
+  });
 });

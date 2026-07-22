@@ -61,13 +61,28 @@ describe("parseOtelPayload", () => {
       expect(result).toEqual([]);
     });
 
-    it("returns a trace with no generations when scopeSpans is empty", () => {
+    it("skips a resourceSpan with no openrouter.trace.id and no spans (no useful trace identifier)", () => {
       const result = parseOtelPayload({
         resourceSpans: [
           { resource: { attributes: [] }, scopeSpans: [] },
         ],
       });
+      expect(result).toEqual([]);
+    });
+
+    it("emits a trace (with empty generations) when openrouter.trace.id is set but no spans are present", () => {
+      const result = parseOtelPayload({
+        resourceSpans: [
+          {
+            resource: {
+              attributes: [makeStringAttr("openrouter.trace.id", "or-explicit")],
+            },
+            scopeSpans: [],
+          },
+        ],
+      });
       expect(result).toHaveLength(1);
+      expect(result[0]?.trace.openrouterTraceId).toBe("or-explicit");
       expect(result[0]?.generations).toEqual([]);
     });
 
@@ -368,7 +383,9 @@ describe("parseOtelPayload", () => {
       const result = parseOtelPayload({
         resourceSpans: [
           makeResourceSpan({
-            scopeSpans: [makeScopeSpan({ spans: [{ spanId: "s" }] })],
+            scopeSpans: [
+              makeScopeSpan({ spans: [{ spanId: "s", traceId: "otel-1" }] }),
+            ],
           }),
         ],
       });
@@ -568,7 +585,7 @@ describe("parseOtelPayload", () => {
       expect(result[0]?.trace.openrouterTraceId).toBe("otel-fallback");
     });
 
-    it("falls back to unknown-<uuid> when neither is present", () => {
+    it("skips a resourceSpan with no openrouter.trace.id and no usable span traceId (no useful identifier)", () => {
       const result = parseOtelPayload({
         resourceSpans: [
           makeResourceSpan({
@@ -576,7 +593,7 @@ describe("parseOtelPayload", () => {
           }),
         ],
       });
-      expect(result[0]?.trace.openrouterTraceId).toMatch(/^unknown-[0-9a-f-]{36}$/);
+      expect(result).toEqual([]);
     });
 
     it("ignores empty openrouter.trace.id", () => {
@@ -666,22 +683,47 @@ describe("parseOtelPayload", () => {
       expect(g?.statusCode).toBe(2);
     });
 
-    it("defaults spanId to empty string when missing", () => {
+    it("skips a span with no spanId and reports no generations", () => {
       const result = parseOtelPayload({
         resourceSpans: [
           makeResourceSpan({
+            resourceAttributes: [makeStringAttr("openrouter.trace.id", "or-t1")],
             scopeSpans: [makeScopeSpan({ spans: [{ traceId: "t1" }] })],
           }),
         ],
       });
-      expect(result[0]?.generations[0]?.spanId).toBe("");
+      expect(result).toHaveLength(1);
+      expect(result[0]?.trace.openrouterTraceId).toBe("or-t1");
+      expect(result[0]?.generations).toEqual([]);
+    });
+
+    it("keeps a sibling span when another span in the same scopeSpan has no spanId", () => {
+      const result = parseOtelPayload({
+        resourceSpans: [
+          makeResourceSpan({
+            scopeSpans: [
+              makeScopeSpan({
+                spans: [
+                  { traceId: "t1" },
+                  makeSpan({ spanId: "kept" }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      });
+      expect(result[0]?.generations.map((g) => g.spanId)).toEqual(["kept"]);
     });
 
     it("returns null for kind when it is not a number", () => {
       const result = parseOtelPayload({
         resourceSpans: [
           makeResourceSpan({
-            scopeSpans: [makeScopeSpan({ spans: [{ spanId: "s", kind: "weird" }] })],
+            scopeSpans: [
+              makeScopeSpan({
+                spans: [{ spanId: "s", traceId: "otel-1", kind: "weird" }],
+              }),
+            ],
           }),
         ],
       });
@@ -693,7 +735,11 @@ describe("parseOtelPayload", () => {
         resourceSpans: [
           makeResourceSpan({
             scopeSpans: [
-              makeScopeSpan({ spans: [{ spanId: "s", status: { code: "x" } }] }),
+              makeScopeSpan({
+                spans: [
+                  { spanId: "s", traceId: "otel-1", status: { code: "x" } },
+                ],
+              }),
             ],
           }),
         ],

@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { pino } from "pino";
 import { getTestDb, seedRawEvent, truncateAll } from "../fixtures/db.js";
 import { processBatch } from "../../src/worker/processBatch.js";
-import { makeMinimalValidOtel } from "../fixtures/otel_payloads.js";
+import {
+  makeMinimalValidOtel,
+  makeOtelPayload,
+  makeResourceSpan,
+  makeScopeSpan,
+  makeSpan,
+  makeStringAttr,
+} from "../fixtures/otel_payloads.js";
 
 const DEPS = {
   batchSize: 100,
@@ -165,5 +172,76 @@ describe("processBatch", () => {
     const second = await processBatch({ db, logger, ...DEPS });
     expect(second.processed).toBe(0);
     expect(second.failed).toBe(0);
+  });
+
+  it("processes a payload with two resourceSpans sharing openrouter.trace.id", async () => {
+    const db = getTestDb();
+    const payload = makeOtelPayload({
+      resourceSpans: [
+        makeResourceSpan({
+          resourceAttributes: [
+            makeStringAttr("openrouter.trace.id", "or-shared"),
+          ],
+          scopeSpans: [makeScopeSpan({ spans: [makeSpan({ spanId: "span-A" })] })],
+        }),
+        makeResourceSpan({
+          resourceAttributes: [
+            makeStringAttr("openrouter.trace.id", "or-shared"),
+          ],
+          scopeSpans: [makeScopeSpan({ spans: [makeSpan({ spanId: "span-B" })] })],
+        }),
+      ],
+    });
+    await seedRawEvent(payload);
+
+    const result = await processBatch({ db, logger, ...DEPS });
+    expect(result.processed).toBe(1);
+    expect(result.failed).toBe(0);
+
+    const traces = await db.selectFrom("traces").selectAll().execute();
+    expect(traces).toHaveLength(1);
+    expect(traces[0]?.openrouter_trace_id).toBe("or-shared");
+
+    const generations = await db
+      .selectFrom("llm_generations")
+      .select(["span_id"])
+      .orderBy("span_id", "asc")
+      .execute();
+    expect(generations.map((g) => g.span_id)).toEqual(["span-A", "span-B"]);
+  });
+
+  it("skips spans with no spanId without failing the batch", async () => {
+    const db = getTestDb();
+    const payload = makeOtelPayload({
+      resourceSpans: [
+        makeResourceSpan({
+          resourceAttributes: [
+            makeStringAttr("openrouter.trace.id", "or-skip"),
+          ],
+          scopeSpans: [
+            makeScopeSpan({
+              spans: [
+                { traceId: "otel-skip" },
+                makeSpan({ spanId: "kept" }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
+    await seedRawEvent(payload);
+
+    const result = await processBatch({ db, logger, ...DEPS });
+    expect(result.processed).toBe(1);
+    expect(result.failed).toBe(0);
+
+    const traces = await db.selectFrom("traces").selectAll().execute();
+    expect(traces).toHaveLength(1);
+
+    const generations = await db
+      .selectFrom("llm_generations")
+      .select(["span_id"])
+      .execute();
+    expect(generations.map((g) => g.span_id)).toEqual(["kept"]);
   });
 });

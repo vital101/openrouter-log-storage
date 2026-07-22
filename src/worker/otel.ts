@@ -203,20 +203,7 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
         if (!span || typeof span !== "object") continue;
         const s = span as Record<string, unknown>;
 
-        const spanId = (s.spanId as string) ?? "";
         const otelTraceId = (s.traceId as string) ?? null;
-        const name = (s.name as string) ?? null;
-        const kind = typeof s.kind === "number" ? s.kind : null;
-        const statusObj = s.status as Record<string, unknown> | undefined;
-        const statusCode =
-          typeof statusObj?.code === "number" ? statusObj.code : null;
-        const startTime = parseUnixNano(s.startTimeUnixNano as string);
-        const endTime = parseUnixNano(s.endTimeUnixNano as string);
-
-        let durationMs: number | null = null;
-        if (startTime && endTime) {
-          durationMs = Math.round(endTime.getTime() - startTime.getTime());
-        }
 
         if (firstOtelTraceId === null && otelTraceId) {
           firstOtelTraceId = otelTraceId;
@@ -228,6 +215,22 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
 
         if (firstSpanAttrs === null) {
           firstSpanAttrs = spanAttrs;
+        }
+
+        const spanId = (s.spanId as string) ?? "";
+        if (spanId === "") continue;
+
+        const name = (s.name as string) ?? null;
+        const kind = typeof s.kind === "number" ? s.kind : null;
+        const statusObj = s.status as Record<string, unknown> | undefined;
+        const statusCode =
+          typeof statusObj?.code === "number" ? statusObj.code : null;
+        const startTime = parseUnixNano(s.startTimeUnixNano as string);
+        const endTime = parseUnixNano(s.endTimeUnixNano as string);
+
+        let durationMs: number | null = null;
+        if (startTime && endTime) {
+          durationMs = Math.round(endTime.getTime() - startTime.getTime());
         }
 
         const operationName =
@@ -297,9 +300,6 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
         const spanType = (spanAttrs["span.type"] as string) ?? null;
         const spanLevel = (spanAttrs["span.level"] as string) ?? null;
 
-        const isMaxTokensInvalid =
-          maxTokens !== null && isNaN(maxTokens);
-
         generations.push({
           spanId,
           otelTraceId,
@@ -320,7 +320,7 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
           finishReason,
           finishReasons,
           temperature,
-          maxTokens: isMaxTokensInvalid ? null : maxTokens,
+          maxTokens,
           topP,
           frequencyPenalty,
           presencePenalty,
@@ -343,10 +343,16 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
 
     const openrouterTraceIdRaw = traceAttrs["openrouter.trace.id"];
     let openrouterTraceId: string;
+    let hasStableTraceId: boolean;
     if (typeof openrouterTraceIdRaw === "string" && openrouterTraceIdRaw) {
       openrouterTraceId = openrouterTraceIdRaw;
+      hasStableTraceId = true;
+    } else if (firstOtelTraceId) {
+      openrouterTraceId = firstOtelTraceId;
+      hasStableTraceId = true;
     } else {
-      openrouterTraceId = firstOtelTraceId ?? `unknown-${crypto.randomUUID()}`;
+      openrouterTraceId = `unknown-${crypto.randomUUID()}`;
+      hasStableTraceId = false;
     }
 
     const sessionId = (traceAttrs["session.id"] as string) ?? null;
@@ -400,6 +406,10 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
       inputUnitPrice,
       outputUnitPrice,
     };
+
+    if (!hasStableTraceId) {
+      continue;
+    }
 
     results.push({ trace, generations });
   }
