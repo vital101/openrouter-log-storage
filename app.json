@@ -2,8 +2,8 @@
   "name": "openrouter-log-storage",
   "description": "Ingests OpenRouter OTel webhooks into Postgres, then asynchronously parses them into traces + llm_generations",
   "formation": {
-    "web": 1,
-    "worker": 1
+    "web": "1",
+    "worker": "1"
   },
   "healthchecks": {
     "web": [
