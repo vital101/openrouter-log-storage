@@ -96,4 +96,52 @@ describe("webhookAuth", () => {
 
     expect(next).toHaveBeenCalledOnce();
   });
+
+  it("accepts an additional secret when the primary is also valid", () => {
+    const middleware = webhookAuth("primary", "X-Webhook-Signature", ["extra"]);
+    const req = makeReq("primary");
+    const { res } = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+
+    middleware(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("accepts an additional secret when the primary does not match", () => {
+    const middleware = webhookAuth("primary", "X-Webhook-Signature", ["extra"]);
+    const req = makeReq("extra");
+    const { res } = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+
+    middleware(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("rejects when neither primary nor additional secrets match", () => {
+    const middleware = webhookAuth("primary", "X-Webhook-Signature", ["extra"]);
+    const req = makeReq("wrong");
+    const { res, status, json } = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+
+    middleware(req, res, next);
+
+    expect(status).toHaveBeenCalledWith(401);
+    expect(json).toHaveBeenCalledWith({ error: "invalid_auth" });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("handles length-mismatch correctly with additional secrets", () => {
+    const middleware = webhookAuth("primary", "X-Webhook-Signature", ["extra-long-secret"]);
+    const req = makeReq("extra-long-secret-shorter");
+    const { res, status, json } = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+
+    middleware(req, res, next);
+
+    expect(status).toHaveBeenCalledWith(401);
+    expect(json).toHaveBeenCalledWith({ error: "invalid_auth" });
+    expect(next).not.toHaveBeenCalled();
+  });
 });

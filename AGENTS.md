@@ -22,6 +22,7 @@ npm test
 | Dev worker (parser) | `npm run dev:worker` |
 | Prod server | `npm run start` |
 | Prod worker | `npm run start:worker` |
+| Cleanup old raw events | `npm run cleanup` |
 | Run all tests | `npm test` |
 | Run tests in watch mode | `npm run test:watch` |
 | Run tests with coverage | `npm run test:coverage` |
@@ -40,6 +41,12 @@ Two independent processes that share one Postgres database:
 
 Both processes must be running for end-to-end ingestion to land in `traces`/`llm_generations`.
 
+## Data retention
+
+- `npm run cleanup` deletes processed/failed `raw_events` older than `RAW_EVENT_RETENTION_DAYS` (default 7). Runs in batches of 1000 to avoid long table locks.
+- On Dokku the cleanup runs daily at 03:00 via `app.json` cron, or can be triggered manually with `npm run cleanup`.
+- Index `raw_events_processing_claimed_idx` (partial on `claimed_at WHERE processing_status = 'processing'`) supports the worker's stale-row reaper.
+
 ## TypeScript / toolchain
 
 - Node 26.5.0 (`.nvmrc`); ESM (`"type": "module"`), `module=NodeNext`.
@@ -53,6 +60,8 @@ Both processes must be running for end-to-end ingestion to land in `traces`/`llm
 - `.env` is auto-loaded by `process.loadEnvFile` in `src/config.ts`. Do not add a `dotenv` import.
 - Required env: `DATABASE_URL`, `WEBHOOK_SECRET`. All other vars have defaults (see `.env.example`).
 - Config is validated with Zod and cached — changes to `process.env` after first `loadConfig()` call have no effect within the same process.
+- `WEBHOOK_SECRETS` (optional, comma-separated) enables zero-downtime rotation — all listed secrets are accepted in addition to `WEBHOOK_SECRET`.
+- `WEBHOOK_RATE_LIMIT_PER_MIN` (default 60) applies to `POST /webhook/openrouter`. Set to 0 to disable.
 
 ## Migrations
 
@@ -69,6 +78,7 @@ Both processes must be running for end-to-end ingestion to land in `traces`/`llm
 
 - `storeParsedTraces` (`src/worker/store.ts`) upserts on `traces.openrouter_trace_id` and `(trace_id, span_id)` in `llm_generations`, then **deletes any `llm_generations` rows for that `trace_id` whose `span_id` is not in the incoming set**. Re-emitting a trace with a smaller span set removes the missing spans. The function does **not** wrap its own work in a transaction; `processBatch` calls it inside a `db.transaction()`, and standalone callers must do the same.
 - `forJsonb` is exported from `src/worker/store.ts` (used to be private). It wraps arrays in `JSON.stringify` before insert because the `pg` driver does not auto-stringify arrays for `jsonb` columns. When adding new jsonb columns that can receive arrays, do the same.
+- `waitForDb(db, opts)` is exported from `src/db.ts`. It polls `SELECT 1` with retries (default 30 attempts, 1s delay). Used by server/main, worker/main, and migrate/main on startup to wait for Postgres readiness.
 - `computeBackoffMs(attempt, base, max)` and `shouldFailAfter(attempt, maxAttempts)` are pure helpers exported from `src/worker/processBatch.ts`. `handleFailure` delegates to them; unit tests cover them directly.
 - Failed parses/stores increment `attempt_count` and retry with exponential backoff (`WORKER_BACKOFF_BASE_MS`, `WORKER_BACKOFF_MAX_MS`) up to `MAX_PROCESSING_ATTEMPTS`, after which the row is marked `failed`.
 - `raw_events.payload` is stored as `jsonb`. The Kysely typing says it's a `string` on insert and `unknown` on select — the `pg` driver auto-parses jsonb into JS values on read. Don't `JSON.parse` it on read.

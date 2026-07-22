@@ -12,6 +12,7 @@ export interface ProcessBatchDeps {
   maxAttempts: number;
   backoffBaseMs: number;
   backoffMaxMs: number;
+  concurrency: number;
 }
 
 export interface ProcessResult {
@@ -136,10 +137,60 @@ async function handleFailure(
   }
 }
 
+async function processRow(
+  db: Kysely<Database>,
+  row: ClaimedRow,
+  deps: ProcessBatchDeps,
+): Promise<"processed" | "failed"> {
+  const { logger } = deps;
+
+  let parsed: ReturnType<typeof parseOtelPayload>;
+  try {
+    parsed = parseOtelPayload(row.payload);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ id: row.id, err: message }, "parse failed");
+    try {
+      await handleFailure(db, row.id, row.attempt_count, message, deps);
+    } catch (err2) {
+      logger.error({ id: row.id, err: err2 }, "handleFailure failed");
+    }
+    return "failed";
+  }
+
+  try {
+    await db.transaction().execute(async (trx) => {
+      if (parsed.length > 0) {
+        await storeParsedTraces(trx, row.id, parsed);
+      }
+      await trx
+        .updateTable("raw_events")
+        .set({
+          processing_status: "processed",
+          processed_at: new Date(),
+          processing_error: null,
+          next_attempt_at: null,
+        })
+        .where("id", "=", row.id)
+        .execute();
+    });
+    return "processed";
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ id: row.id, err: message }, "store failed");
+    try {
+      await handleFailure(db, row.id, row.attempt_count, message, deps);
+    } catch (err2) {
+      logger.error({ id: row.id, err: err2 }, "handleFailure failed");
+    }
+    return "failed";
+  }
+}
+
 export async function processBatch(
   deps: ProcessBatchDeps,
 ): Promise<ProcessResult> {
-  const { db, logger } = deps;
+  const { db, logger, concurrency } = deps;
 
   await reapStaleProcessing(db);
 
@@ -149,48 +200,14 @@ export async function processBatch(
   let processed = 0;
   let failed = 0;
 
-  for (const row of claimed) {
-    let parsed: ReturnType<typeof parseOtelPayload>;
-    try {
-      parsed = parseOtelPayload(row.payload);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error({ id: row.id, err: message }, "parse failed");
-      try {
-        await handleFailure(db, row.id, row.attempt_count, message, deps);
-      } catch (err2) {
-        logger.error({ id: row.id, err: err2 }, "handleFailure failed");
-      }
-      failed++;
-      continue;
-    }
-
-    try {
-      await db.transaction().execute(async (trx) => {
-        if (parsed.length > 0) {
-          await storeParsedTraces(trx, row.id, parsed);
-        }
-        await trx
-          .updateTable("raw_events")
-          .set({
-            processing_status: "processed",
-            processed_at: new Date(),
-            processing_error: null,
-            next_attempt_at: null,
-          })
-          .where("id", "=", row.id)
-          .execute();
-      });
-      processed++;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error({ id: row.id, err: message }, "store failed");
-      try {
-        await handleFailure(db, row.id, row.attempt_count, message, deps);
-      } catch (err2) {
-        logger.error({ id: row.id, err: err2 }, "handleFailure failed");
-      }
-      failed++;
+  for (let i = 0; i < claimed.length; i += concurrency) {
+    const chunk = claimed.slice(i, i + concurrency);
+    const results = await Promise.all(
+      chunk.map((row) => processRow(db, row, deps)),
+    );
+    for (const r of results) {
+      if (r === "processed") processed++;
+      else failed++;
     }
   }
 

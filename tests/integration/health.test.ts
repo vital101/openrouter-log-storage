@@ -20,6 +20,11 @@ const TEST_CONFIG: Config = {
   MAX_PROCESSING_ATTEMPTS: 5,
   WORKER_BACKOFF_BASE_MS: 1_000,
   WORKER_BACKOFF_MAX_MS: 300_000,
+  RAW_EVENT_RETENTION_DAYS: 7,
+  DB_POOL_MAX: 10,
+  WORKER_CONCURRENCY: 1,
+  WEBHOOK_SECRETS: undefined,
+  WEBHOOK_RATE_LIMIT_PER_MIN: 0,
 };
 
 describe("GET /healthz", () => {
@@ -44,7 +49,7 @@ describe("GET /healthz", () => {
     const res = await request(app).get("/healthz");
     expect(res.status).toBe(503);
     expect(res.body.status).toBe("down");
-    expect(typeof res.body.error).toBe("string");
+    expect(res.body.error).toBeUndefined();
     await badDb.destroy();
   });
 });

@@ -1,10 +1,12 @@
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import express, { type Express } from "express";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 import type { Logger } from "pino";
 import type { Kysely } from "kysely";
 import { loadConfig, type Config } from "./config.js";
-import { createDb } from "./db.js";
+import { createDb, waitForDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { healthRouter } from "./routes/health.js";
 import { webhookRouter } from "./routes/webhook.js";
@@ -19,14 +21,19 @@ export function createApp(
 ): Express {
   const app = express();
   app.disable("x-powered-by");
+  app.set("trust proxy", 1);
   app.use(helmet());
   app.use(pinoHttp({ logger }));
   app.use(express.json({ limit: config.WEBHOOK_BODY_LIMIT }));
 
   app.use(healthRouter(db));
+
+  const extraSecrets = config.WEBHOOK_SECRETS
+    ? config.WEBHOOK_SECRETS.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
   app.use(
-    webhookAuth(config.WEBHOOK_SECRET, config.WEBHOOK_SECRET_HEADER),
-    webhookRouter(db, config.WEBHOOK_SECRET_HEADER),
+    webhookAuth(config.WEBHOOK_SECRET, config.WEBHOOK_SECRET_HEADER, extraSecrets),
+    webhookRouter(db, config.WEBHOOK_SECRET_HEADER, config.WEBHOOK_RATE_LIMIT_PER_MIN),
   );
 
   app.use(errorHandler);
@@ -37,7 +44,11 @@ export function createApp(
 async function main() {
   const config = loadConfig();
   const logger = createLogger(config.LOG_LEVEL);
-  const db = createDb(config.DATABASE_URL);
+  const db = createDb(config.DATABASE_URL, config.DB_POOL_MAX);
+
+  await waitForDb(db);
+  logger.info("database ready");
+
   const app = createApp(db, config, logger);
 
   const server = app.listen(config.PORT, () => {
@@ -66,7 +77,10 @@ async function main() {
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
-main().catch((err) => {
-  console.error("fatal:", err);
-  process.exit(1);
-});
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (isMain) {
+  main().catch((err) => {
+    console.error("fatal:", err);
+    process.exit(1);
+  });
+}

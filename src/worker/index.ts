@@ -1,7 +1,9 @@
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Kysely } from "kysely";
 import type { Logger } from "pino";
 import { loadConfig, type Config } from "../config.js";
-import { createDb } from "../db.js";
+import { createDb, waitForDb } from "../db.js";
 import { createLogger } from "../logger.js";
 import { processBatch } from "./processBatch.js";
 import type { Database } from "../types.js";
@@ -34,6 +36,7 @@ export function startWorkerLoop(opts: StartWorkerLoopOptions): WorkerLoopHandle 
         maxAttempts: config.MAX_PROCESSING_ATTEMPTS,
         backoffBaseMs: config.WORKER_BACKOFF_BASE_MS,
         backoffMaxMs: config.WORKER_BACKOFF_MAX_MS,
+        concurrency: config.WORKER_CONCURRENCY,
       });
       if (result.processed > 0 || result.failed > 0) {
         logger.info(result, "batch done");
@@ -65,7 +68,10 @@ export function startWorkerLoop(opts: StartWorkerLoopOptions): WorkerLoopHandle 
 async function main() {
   const config = loadConfig();
   const logger = createLogger(config.LOG_LEVEL).child({ component: "worker" });
-  const db = createDb(config.DATABASE_URL);
+  const db = createDb(config.DATABASE_URL, config.DB_POOL_MAX);
+
+  await waitForDb(db);
+  logger.info("database ready");
 
   const { stop } = startWorkerLoop({ db, logger, config });
 
@@ -93,7 +99,10 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error("worker fatal:", err);
-  process.exit(1);
-});
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (isMain) {
+  main().catch((err) => {
+    console.error("worker fatal:", err);
+    process.exit(1);
+  });
+}

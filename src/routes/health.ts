@@ -9,13 +9,8 @@ export function healthRouter(db: Kysely<Database>) {
     try {
       await sql`SELECT 1`.execute(db);
       res.json({ status: "ok" });
-    } catch (err) {
-      res
-        .status(503)
-        .json({
-          status: "down",
-          error: err instanceof Error ? err.message : String(err),
-        });
+    } catch {
+      res.status(503).json({ status: "down" });
     }
   });
 

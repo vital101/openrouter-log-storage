@@ -1,11 +1,25 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import type { Kysely } from "kysely";
 import type { Database } from "../types.js";
 
 const TEST_CONNECTION_HEADER = "x-test-connection";
 
-export function webhookRouter(db: Kysely<Database>, authHeaderName: string) {
+export function webhookRouter(db: Kysely<Database>, authHeaderName: string, rateLimitPerMin: number = 60) {
   const router = Router();
+
+  if (rateLimitPerMin > 0) {
+    router.use(
+      rateLimit({
+        windowMs: 60_000,
+        max: rateLimitPerMin,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: "rate_limited" },
+        skip: (req) => req.get(TEST_CONNECTION_HEADER)?.toLowerCase() === "true",
+      }),
+    );
+  }
 
   router.post("/webhook/openrouter", async (req, res) => {
     if (req.get(TEST_CONNECTION_HEADER)?.toLowerCase() === "true") {

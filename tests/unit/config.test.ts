@@ -26,6 +26,11 @@ describe("loadConfig", () => {
     expect(config.MAX_PROCESSING_ATTEMPTS).toBe(5);
     expect(config.WORKER_BACKOFF_BASE_MS).toBe(1000);
     expect(config.WORKER_BACKOFF_MAX_MS).toBe(300000);
+    expect(config.RAW_EVENT_RETENTION_DAYS).toBe(7);
+    expect(config.DB_POOL_MAX).toBe(10);
+    expect(config.WORKER_CONCURRENCY).toBe(1);
+    expect(config.WEBHOOK_SECRETS).toBeUndefined();
+    expect(config.WEBHOOK_RATE_LIMIT_PER_MIN).toBe(60);
   });
 
   it("throws when DATABASE_URL is missing", async () => {

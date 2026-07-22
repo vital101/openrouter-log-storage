@@ -16,6 +16,7 @@ const DEPS = {
   maxAttempts: 5,
   backoffBaseMs: 1_000,
   backoffMaxMs: 300_000,
+  concurrency: 1,
 };
 
 const logger = pino({ level: "silent" });

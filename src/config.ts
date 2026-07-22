@@ -16,6 +16,11 @@ const envSchema = z.object({
   MAX_PROCESSING_ATTEMPTS: z.coerce.number().int().positive().default(5),
   WORKER_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(1000),
   WORKER_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(300000),
+  RAW_EVENT_RETENTION_DAYS: z.coerce.number().int().positive().default(7),
+  DB_POOL_MAX: z.coerce.number().int().positive().default(10),
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(1),
+  WEBHOOK_SECRETS: z.string().optional(),
+  WEBHOOK_RATE_LIMIT_PER_MIN: z.coerce.number().int().nonnegative().default(60),
 });
 
 export type Config = z.infer<typeof envSchema>;

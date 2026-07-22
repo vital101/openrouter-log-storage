@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "start:worker": "node dist/worker/index.js",
+    "cleanup": "tsx src/cleanup.ts",
     "migrate": "tsx src/migrate.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -20,6 +21,7 @@
   },
   "dependencies": {
     "express": "^5.2.1",
+    "express-rate-limit": "^8.6.0",
     "helmet": "^8.3.0",
     "kysely": "^0.29.4",
     "pg": "^8.22.0",

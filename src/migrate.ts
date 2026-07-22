@@ -6,7 +6,7 @@ import {
   type Migration,
   type MigrationProvider,
 } from "kysely/migration";
-import { createDb } from "./db.js";
+import { createDb, waitForDb } from "./db.js";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 
@@ -54,8 +54,12 @@ function createFsMigrationProvider(folder: string): MigrationProvider {
 }
 
 async function main() {
-  const db = createDb(config.DATABASE_URL);
+  const db = createDb(config.DATABASE_URL, config.DB_POOL_MAX);
   const migrationsFolder = path.resolve(process.cwd(), "migrations");
+
+  await waitForDb(db).catch(() => {
+    logger.warn("database not ready, will attempt migration anyway");
+  });
 
   const provider = createFsMigrationProvider(migrationsFolder);
   const available = await provider.getMigrations();
