@@ -9,6 +9,7 @@ import { loadConfig, type Config } from "./config.js";
 import { createDb, waitForDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { healthRouter } from "./routes/health.js";
+import { usageRouter } from "./routes/usage.js";
 import { webhookRouter } from "./routes/webhook.js";
 import { webhookAuth } from "./middleware/webhookAuth.js";
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -27,6 +28,7 @@ export function createApp(
   app.use(express.json({ limit: config.WEBHOOK_BODY_LIMIT }));
 
   app.use(healthRouter(db));
+  app.use(usageRouter(db, config.TRACES_RETENTION_DAYS));
 
   const extraSecrets = config.WEBHOOK_SECRETS
     ? config.WEBHOOK_SECRETS.split(",").map((s) => s.trim()).filter(Boolean)

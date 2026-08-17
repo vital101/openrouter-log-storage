@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { getTestDb, truncateAll } from "../fixtures/db.js";
-import { deleteOldRawEvents } from "../../src/cleanup.js";
+import { deleteOldRawEvents, deleteOldTraces } from "../../src/cleanup.js";
 
 const OLD_DATE = new Date("2020-01-01T00:00:00Z");
 const RECENT_DATE = new Date(Date.now() + 86400000);
@@ -104,6 +104,73 @@ describe("cleanup retention", () => {
     const db = getTestDb();
 
     const deleted = await deleteOldRawEvents(db, 7);
+    expect(deleted).toBe(0);
+  });
+});
+
+describe("traces retention cleanup", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  async function seedTrace(receivedAt: Date, withGenerations = true): Promise<void> {
+    const db = getTestDb();
+    const trace = await db
+      .insertInto("traces")
+      .values({
+        openrouter_trace_id: `trace-${receivedAt.getTime()}-${Math.random()}`,
+        received_at: receivedAt,
+      })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+
+    if (withGenerations) {
+      await db
+        .insertInto("llm_generations")
+        .values({
+          trace_id: trace.id,
+          span_id: `span-${receivedAt.getTime()}-${Math.random()}`,
+          start_time: receivedAt,
+          request_model: "test-model",
+          input_tokens: 10,
+          output_tokens: 5,
+        })
+        .execute();
+    }
+  }
+
+  it("deletes traces older than retention days and cascades generations", async () => {
+    const db = getTestDb();
+    await seedTrace(OLD_DATE);
+    await seedTrace(RECENT_DATE);
+
+    const deleted = await deleteOldTraces(db, 30);
+    expect(deleted).toBe(1);
+
+    const remainingTraces = await db.selectFrom("traces").selectAll().execute();
+    expect(remainingTraces).toHaveLength(1);
+
+    const remainingGenerations = await db
+      .selectFrom("llm_generations")
+      .selectAll()
+      .execute();
+    expect(remainingGenerations).toHaveLength(1);
+  });
+
+  it("does not delete recent traces", async () => {
+    const db = getTestDb();
+    await seedTrace(RECENT_DATE, false);
+
+    const deleted = await deleteOldTraces(db, 30);
+    expect(deleted).toBe(0);
+
+    const remaining = await db.selectFrom("traces").selectAll().execute();
+    expect(remaining).toHaveLength(1);
+  });
+
+  it("returns 0 when there are no traces at all", async () => {
+    const db = getTestDb();
+    const deleted = await deleteOldTraces(db, 30);
     expect(deleted).toBe(0);
   });
 });

@@ -27,6 +27,7 @@ describe("loadConfig", () => {
     expect(config.WORKER_BACKOFF_BASE_MS).toBe(1000);
     expect(config.WORKER_BACKOFF_MAX_MS).toBe(300000);
     expect(config.RAW_EVENT_RETENTION_DAYS).toBe(7);
+    expect(config.TRACES_RETENTION_DAYS).toBe(30);
     expect(config.DB_POOL_MAX).toBe(10);
     expect(config.WORKER_CONCURRENCY).toBe(1);
     expect(config.WEBHOOK_SECRETS).toBeUndefined();

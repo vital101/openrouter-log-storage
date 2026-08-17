@@ -43,9 +43,10 @@ Both processes must be running for end-to-end ingestion to land in `traces`/`llm
 
 ## Data retention
 
-- `npm run cleanup` deletes processed/failed `raw_events` older than `RAW_EVENT_RETENTION_DAYS` (default 7). Runs in batches of 1000 to avoid long table locks.
+- `npm run cleanup` deletes processed/failed `raw_events` older than `RAW_EVENT_RETENTION_DAYS` (default 7) and `traces` older than `TRACES_RETENTION_DAYS` (default 30). Deleting `traces` cascades to `llm_generations` (FK `ON DELETE CASCADE`). Both run in batches of 1000 to avoid long table locks.
 - On Dokku the cleanup runs daily at 03:00 via `app.json` cron, or can be triggered manually with `npm run cleanup`.
 - Index `raw_events_processing_claimed_idx` (partial on `claimed_at WHERE processing_status = 'processing'`) supports the worker's stale-row reaper.
+- **Disk space:** Postgres `DELETE` only marks tuples dead; steady-state reuse is handled by autovacuum (new inserts fill the reclaimed space), so no manual vacuum is needed for the daily cleanup. If you enable retention on a large accumulated history, run a one-time `VACUUM FULL traces, llm_generations` (brief exclusive lock; or use `pg_repack` for a lock-free rewrite) to return space to the OS. Do not put `VACUUM FULL` in the cron.
 
 ## TypeScript / toolchain
 

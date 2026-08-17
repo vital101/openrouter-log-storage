@@ -17,6 +17,7 @@ const envSchema = z.object({
   WORKER_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(1000),
   WORKER_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(300000),
   RAW_EVENT_RETENTION_DAYS: z.coerce.number().int().positive().default(7),
+  TRACES_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
   DB_POOL_MAX: z.coerce.number().int().positive().default(10),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(1),
   WEBHOOK_SECRETS: z.string().optional(),

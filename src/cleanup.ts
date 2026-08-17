@@ -38,16 +38,54 @@ export async function deleteOldRawEvents(
   return totalDeleted;
 }
 
+export async function deleteOldTraces(
+  db: Kysely<Database>,
+  retentionDays: number,
+  batchSize: number = BATCH_SIZE,
+): Promise<number> {
+  let totalDeleted = 0;
+
+  for (;;) {
+    const result = await sql<{ count: string }>`
+      WITH deleted AS (
+        DELETE FROM traces
+        WHERE id IN (
+          SELECT id FROM traces
+          WHERE received_at < now() - ${retentionDays} * interval '1 day'
+          LIMIT ${batchSize}
+        )
+        RETURNING id
+      )
+      SELECT count(*)::text AS count FROM deleted
+    `.execute(db);
+
+    const deleted = Number(result.rows[0]?.count ?? 0);
+    totalDeleted += deleted;
+    if (deleted < batchSize) break;
+  }
+
+  return totalDeleted;
+}
+
 async function main() {
   const config = loadConfig();
   const logger = createLogger(config.LOG_LEVEL).child({ component: "cleanup" });
   const db = createDb(config.DATABASE_URL, config.DB_POOL_MAX);
 
-  logger.info({ retentionDays: config.RAW_EVENT_RETENTION_DAYS }, "cleanup started");
+  logger.info(
+    {
+      rawEventRetentionDays: config.RAW_EVENT_RETENTION_DAYS,
+      tracesRetentionDays: config.TRACES_RETENTION_DAYS,
+    },
+    "cleanup started",
+  );
 
   try {
-    const deleted = await deleteOldRawEvents(db, config.RAW_EVENT_RETENTION_DAYS);
-    logger.info({ deleted }, "cleanup complete");
+    const rawDeleted = await deleteOldRawEvents(db, config.RAW_EVENT_RETENTION_DAYS);
+    logger.info({ deleted: rawDeleted }, "raw_events cleanup complete");
+
+    const tracesDeleted = await deleteOldTraces(db, config.TRACES_RETENTION_DAYS);
+    logger.info({ deleted: tracesDeleted }, "traces cleanup complete");
   } catch (err) {
     logger.error({ err }, "cleanup failed");
     await db.destroy();
