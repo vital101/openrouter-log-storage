@@ -68,7 +68,11 @@ export function startWorkerLoop(opts: StartWorkerLoopOptions): WorkerLoopHandle 
 async function main() {
   const config = loadConfig();
   const logger = createLogger(config.LOG_LEVEL).child({ component: "worker" });
-  const db = createDb(config.DATABASE_URL, config.DB_POOL_MAX);
+  const db = createDb(config.DATABASE_URL, config.DB_POOL_MAX, {
+    onConnect: (client) => {
+      void client.query("SET synchronous_commit = OFF").catch(() => {});
+    },
+  });
 
   await waitForDb(db);
   logger.info("database ready");

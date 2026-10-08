@@ -280,16 +280,16 @@ describe("parseOtelPayload", () => {
         resourceSpans: [
           makeResourceSpan({
             resourceAttributes: [
-              makeStringAttr("trace.metadata.openrouter.entity_id", "ent-1"),
-              makeStringAttr("trace.metadata.openrouter.api_key_name", "k-1"),
-              makeStringAttr("trace.metadata.environment", "prod"),
+              makeStringAttr("trace.metadata.openrouter.team", "team-1"),
+              makeStringAttr("trace.metadata.openrouter.request_id", "r-1"),
+              makeStringAttr("trace.metadata.stage", "prod"),
             ],
           }),
         ],
       });
       expect(result[0]?.trace.metadata).toEqual({
-        openrouter: { entity_id: "ent-1", api_key_name: "k-1" },
-        environment: "prod",
+        openrouter: { team: "team-1", request_id: "r-1" },
+        stage: "prod",
       });
     });
 
@@ -305,8 +305,8 @@ describe("parseOtelPayload", () => {
                 spans: [
                   makeSpan({
                     attributes: [
-                      makeStringAttr("trace.metadata.openrouter.entity_id", "ent-span"),
-                      makeStringAttr("trace.metadata.source", "from-span"),
+                      makeStringAttr("trace.metadata.openrouter.team", "team-span"),
+                      makeStringAttr("trace.metadata.owner", "from-span"),
                     ],
                   }),
                 ],
@@ -316,8 +316,8 @@ describe("parseOtelPayload", () => {
         ],
       });
       expect(result[0]?.trace.metadata).toEqual({
-        openrouter: { entity_id: "ent-span" },
-        source: "from-span",
+        openrouter: { team: "team-span" },
+        owner: "from-span",
       });
     });
 
@@ -327,7 +327,7 @@ describe("parseOtelPayload", () => {
           {
             resource: {
               attributes: [
-                makeStringAttr("trace.metadata.openrouter.entity_id", "from-resource"),
+                makeStringAttr("trace.metadata.openrouter.team", "from-resource"),
               ],
             },
             scopeSpans: [
@@ -335,7 +335,7 @@ describe("parseOtelPayload", () => {
                 spans: [
                   makeSpan({
                     attributes: [
-                      makeStringAttr("trace.metadata.openrouter.entity_id", "from-span"),
+                      makeStringAttr("trace.metadata.openrouter.team", "from-span"),
                     ],
                   }),
                 ],
@@ -345,7 +345,7 @@ describe("parseOtelPayload", () => {
         ],
       });
       expect(result[0]?.trace.metadata).toEqual({
-        openrouter: { entity_id: "from-resource" },
+        openrouter: { team: "from-resource" },
       });
     });
 
@@ -973,8 +973,8 @@ describe("parseOtelPayload", () => {
     });
   });
 
-  describe("rawAttributes on generation", () => {
-    it("stores the full flattened span attributes", () => {
+  describe("metadata", () => {
+    it("keeps only non-extracted trace.metadata keys", () => {
       const result = parseOtelPayload({
         resourceSpans: [
           makeResourceSpan({
@@ -983,9 +983,14 @@ describe("parseOtelPayload", () => {
                 spans: [
                   makeSpan({
                     attributes: [
-                      makeStringAttr("gen_ai.system", "openrouter"),
-                      makeIntAttr("gen_ai.usage.input_tokens", 10),
-                      makeStringAttr("custom.attr", "value"),
+                      makeStringAttr("trace.metadata.openrouter.entity_id", "e1"),
+                      makeStringAttr("trace.metadata.openrouter.api_key_name", "key1"),
+                      makeStringAttr("trace.metadata.openrouter.provider_name", "p1"),
+                      makeStringAttr("trace.metadata.openrouter.provider_slug", "openai"),
+                      makeStringAttr("trace.metadata.environment", "prod"),
+                      makeStringAttr("trace.metadata.source", "webhook"),
+                      makeStringAttr("trace.metadata.custom", "kept"),
+                      makeDoubleAttr("trace.metadata.openrouter.input_unit_price", 0.5),
                     ],
                   }),
                 ],
@@ -994,11 +999,9 @@ describe("parseOtelPayload", () => {
           }),
         ],
       });
-      const raw = result[0]?.generations[0]?.rawAttributes;
-      expect(raw).toEqual({
-        "gen_ai.system": "openrouter",
-        "gen_ai.usage.input_tokens": 10,
-        "custom.attr": "value",
+      expect(result[0]?.trace.metadata).toEqual({
+        custom: "kept",
+        openrouter: { input_unit_price: 0.5 },
       });
     });
   });

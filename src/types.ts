@@ -73,12 +73,24 @@ export interface LlmGenerationsTable {
   output_unit_price: number | null;
   prompt: unknown | null;
   completion: unknown | null;
-  raw_attributes: unknown | null;
   created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface UsageDailyTable {
+  day: ColumnType<string, string, never>;
+  model: ColumnType<string, string, never>;
+  calls: ColumnType<string, number | string, never>;
+  input_tokens: ColumnType<string, number | string, never>;
+  output_tokens: ColumnType<string, number | string, never>;
+  cached_tokens: ColumnType<string, number | string, never>;
+  reasoning_tokens: ColumnType<string, number | string, never>;
+  total_tokens: ColumnType<string, number | string, never>;
+  total_cost: ColumnType<string, number | string, never>;
 }
 
 export interface Database {
   raw_events: RawEventsTable;
   traces: TracesTable;
   llm_generations: LlmGenerationsTable;
+  usage_daily: UsageDailyTable;
 }

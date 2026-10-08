@@ -106,6 +106,47 @@ describe("cleanup retention", () => {
     const deleted = await deleteOldRawEvents(db, 7);
     expect(deleted).toBe(0);
   });
+
+  it("nulls traces.raw_event_id when referenced raw_events are deleted across batch boundaries", async () => {
+    const db = getTestDb();
+    const count = 1500;
+
+    const rawRows = await db
+      .insertInto("raw_events")
+      .values(
+        Array.from({ length: count }, (_, i) => ({
+          payload: JSON.stringify({ i }),
+          processing_status: "processed" as const,
+          received_at: OLD_DATE,
+          processed_at: OLD_DATE,
+          attempt_count: 1,
+        })),
+      )
+      .returning("id")
+      .execute();
+    const rawIds = rawRows.map((r) => r.id);
+
+    await db
+      .insertInto("traces")
+      .values(
+        rawIds.map((id, i) => ({
+          openrouter_trace_id: `or-fk-${i}`,
+          raw_event_id: id,
+          received_at: RECENT_DATE,
+        })),
+      )
+      .execute();
+
+    const deleted = await deleteOldRawEvents(db, 7);
+    expect(deleted).toBe(count);
+
+    const traces = await db
+      .selectFrom("traces")
+      .select(["raw_event_id"])
+      .execute();
+    expect(traces).toHaveLength(count);
+    expect(traces.every((t) => t.raw_event_id === null)).toBe(true);
+  });
 });
 
 describe("traces retention cleanup", () => {

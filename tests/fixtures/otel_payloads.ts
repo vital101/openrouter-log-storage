@@ -179,7 +179,6 @@ export function makeParsedTraceFor(
         totalCost: 0.003,
         prompt: [{ role: "user", content: "hi" }],
         completion: [{ role: "assistant", content: "hello" }],
-        rawAttributes: { "gen_ai.system": "openrouter" },
       })),
     },
   ];

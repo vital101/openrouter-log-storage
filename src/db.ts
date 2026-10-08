@@ -1,16 +1,38 @@
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { Kysely, PostgresDialect } from "kysely";
 import type { Database } from "./types.js";
 
 import { sql } from "kysely";
 
-export function createDb(databaseUrl: string, poolMax: number = 10): Kysely<Database> {
-  const dialect = new PostgresDialect({
-    pool: new Pool({
-      connectionString: databaseUrl,
-      max: poolMax,
-    }),
+export interface CreateDbOptions {
+  onConnect?: (client: PoolClient) => void;
+}
+
+export function createDb(
+  databaseUrl: string,
+  poolMax: number = 10,
+  options: CreateDbOptions = {},
+): Kysely<Database> {
+  const pool = new Pool({
+    connectionString: databaseUrl,
+    max: poolMax,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+    statement_timeout: 30_000,
   });
+
+  const { onConnect } = options;
+  if (onConnect) {
+    pool.on("connect", (client) => {
+      try {
+        onConnect(client);
+      } catch {
+        // session tuning must never block connection creation
+      }
+    });
+  }
+
+  const dialect = new PostgresDialect({ pool });
 
   return new Kysely<Database>({ dialect });
 }

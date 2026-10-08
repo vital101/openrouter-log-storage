@@ -98,19 +98,17 @@ export function usageRouter(db: Kysely<Database>, retentionDays: number) {
     try {
       const rows = await sql<UsageRow>`
         SELECT
-          start_time::date::text AS day,
-          COALESCE(request_model, '(unknown)') AS model,
-          COUNT(*) AS calls,
-          COALESCE(SUM(input_tokens), 0)::text AS input_tokens,
-          COALESCE(SUM(output_tokens), 0)::text AS output_tokens,
-          COALESCE(SUM(cached_tokens), 0)::text AS cached_tokens,
-          COALESCE(SUM(reasoning_tokens), 0)::text AS reasoning_tokens,
-          COALESCE(SUM(total_tokens), 0)::text AS total_tokens,
-          COALESCE(SUM(total_cost), 0)::text AS total_cost
-        FROM llm_generations
-        WHERE start_time IS NOT NULL
-          AND start_time >= now() - ${retentionDays} * interval '1 day'
-        GROUP BY day, model
+          day::text AS day,
+          model,
+          calls::text AS calls,
+          input_tokens::text AS input_tokens,
+          output_tokens::text AS output_tokens,
+          cached_tokens::text AS cached_tokens,
+          reasoning_tokens::text AS reasoning_tokens,
+          total_tokens::text AS total_tokens,
+          total_cost::text AS total_cost
+        FROM usage_daily
+        WHERE day >= (now() - ${retentionDays} * interval '1 day')::date
         ORDER BY day DESC, calls DESC
       `.execute(db);
 

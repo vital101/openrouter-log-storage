@@ -134,7 +134,6 @@ export async function storeParsedTraces(
       output_unit_price: c.trace.outputUnitPrice,
       prompt: forJsonb(g.prompt),
       completion: forJsonb(g.completion),
-      raw_attributes: forJsonb(g.rawAttributes),
     }));
   });
 
@@ -178,7 +177,6 @@ export async function storeParsedTraces(
           output_unit_price: sql`excluded.output_unit_price`,
           prompt: sql`excluded.prompt`,
           completion: sql`excluded.completion`,
-          raw_attributes: sql`excluded.raw_attributes`,
         }),
       )
       .execute();
@@ -197,8 +195,53 @@ export async function storeParsedTraces(
       await db
         .deleteFrom("llm_generations")
         .where("trace_id", "=", traceId)
-        .where("span_id", "not in", spanIds)
+        .where(sql<boolean>`span_id <> all(${spanIds}::text[])`)
         .execute();
     }
+
+    await refreshUsageDailyBuckets(db, [...spanIdsByTraceId.keys()]);
   }
+}
+
+async function refreshUsageDailyBuckets(
+  db: Kysely<Database>,
+  traceIds: string[],
+): Promise<void> {
+  if (traceIds.length === 0) return;
+
+  await sql`
+    WITH touched AS (
+      SELECT DISTINCT (start_time AT TIME ZONE 'UTC')::date AS day,
+             COALESCE(request_model, '(unknown)') AS model
+      FROM llm_generations
+      WHERE trace_id = ANY(${traceIds}::uuid[])
+    ),
+    agg AS (
+      SELECT (g.start_time AT TIME ZONE 'UTC')::date AS day,
+             COALESCE(g.request_model, '(unknown)') AS model,
+             COUNT(*)::bigint AS calls,
+             COALESCE(SUM(g.input_tokens), 0)::bigint AS input_tokens,
+             COALESCE(SUM(g.output_tokens), 0)::bigint AS output_tokens,
+             COALESCE(SUM(g.cached_tokens), 0)::bigint AS cached_tokens,
+             COALESCE(SUM(g.reasoning_tokens), 0)::bigint AS reasoning_tokens,
+             COALESCE(SUM(g.total_tokens), 0)::bigint AS total_tokens,
+             COALESCE(SUM(g.total_cost), 0) AS total_cost
+      FROM llm_generations g
+      WHERE g.start_time >= (SELECT (min(t.day)::timestamp AT TIME ZONE 'UTC') FROM touched t)
+        AND g.start_time < (SELECT ((max(t.day)::timestamp AT TIME ZONE 'UTC') + interval '1 day') FROM touched t)
+      GROUP BY 1, 2
+    )
+    INSERT INTO usage_daily (day, model, calls, input_tokens, output_tokens, cached_tokens, reasoning_tokens, total_tokens, total_cost)
+    SELECT a.day, a.model, a.calls, a.input_tokens, a.output_tokens, a.cached_tokens, a.reasoning_tokens, a.total_tokens, a.total_cost
+    FROM agg a
+    JOIN touched t USING (day, model)
+    ON CONFLICT (day, model) DO UPDATE SET
+      calls = EXCLUDED.calls,
+      input_tokens = EXCLUDED.input_tokens,
+      output_tokens = EXCLUDED.output_tokens,
+      cached_tokens = EXCLUDED.cached_tokens,
+      reasoning_tokens = EXCLUDED.reasoning_tokens,
+      total_tokens = EXCLUDED.total_tokens,
+      total_cost = EXCLUDED.total_cost
+  `.execute(db);
 }

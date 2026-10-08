@@ -25,6 +25,7 @@ export async function truncateAll(): Promise<void> {
   await db.deleteFrom("llm_generations").execute();
   await db.deleteFrom("traces").execute();
   await db.deleteFrom("raw_events").execute();
+  await db.deleteFrom("usage_daily").execute();
 }
 
 export async function seedRawEvent(payload: unknown): Promise<number> {

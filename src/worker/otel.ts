@@ -53,7 +53,6 @@ export interface ParsedGeneration {
   totalCost: number | null;
   prompt: unknown | null;
   completion: unknown | null;
-  rawAttributes: Record<string, unknown>;
 }
 
 export interface ParsedPayload {
@@ -120,11 +119,20 @@ function setNested(
   current[parts[parts.length - 1]!] = value;
 }
 
+const EXTRACTED_METADATA_KEYS = new Set([
+  "trace.metadata.openrouter.entity_id",
+  "trace.metadata.openrouter.api_key_name",
+  "trace.metadata.openrouter.provider_name",
+  "trace.metadata.openrouter.provider_slug",
+  "trace.metadata.environment",
+  "trace.metadata.source",
+]);
+
 function buildMetadata(
   flat: Record<string, unknown>,
 ): Record<string, unknown> | null {
-  const entries = Object.entries(flat).filter(([k]) =>
-    k.startsWith("trace.metadata."),
+  const entries = Object.entries(flat).filter(
+    ([k]) => k.startsWith("trace.metadata.") && !EXTRACTED_METADATA_KEYS.has(k),
   );
   if (entries.length === 0) return null;
 
@@ -334,7 +342,6 @@ export function parseOtelPayload(payload: unknown): ParsedPayload[] {
           totalCost,
           prompt,
           completion,
-          rawAttributes: spanAttrs,
         });
       }
     }

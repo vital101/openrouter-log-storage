@@ -101,6 +101,34 @@ describe("migrations", () => {
     expect(claim).toBeDefined();
   });
 
+  it("drops redundant indexes and keeps the FK support index on traces.raw_event_id", async () => {
+    const rows = await sql<{ indexname: string }>`SELECT indexname FROM pg_indexes WHERE tablename IN ('traces', 'llm_generations')`.execute(db);
+    const names = rows.rows.map((i) => i.indexname);
+    expect(names).not.toContain("llm_generations_trace_id_idx");
+    expect(names).not.toContain("llm_generations_request_model_idx");
+    expect(names).not.toContain("llm_generations_provider_name_idx");
+    expect(names).not.toContain("traces_user_id_idx");
+    expect(names).not.toContain("traces_session_id_idx");
+    expect(names).toContain("traces_raw_event_id_idx");
+  });
+
+  it("drops the llm_generations.raw_attributes column", async () => {
+    const rows = await sql<{ column_name: string }>`SELECT column_name FROM information_schema.columns WHERE table_name = 'llm_generations'`.execute(db);
+    expect(rows.rows.map((c) => c.column_name)).not.toContain("raw_attributes");
+  });
+
+  it("creates usage_daily with a composite primary key on (day, model)", async () => {
+    const tables = await sql<{ table_name: string }>`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`.execute(db);
+    expect(tables.rows.map((t) => t.table_name)).toContain("usage_daily");
+
+    const pk = await sql<{ constraint_name: string }>`
+      SELECT constraint_name FROM information_schema.table_constraints
+      WHERE table_name = 'usage_daily' AND constraint_type = 'PRIMARY KEY'
+    `.execute(db);
+    expect(pk.rows).toHaveLength(1);
+    expect(pk.rows[0]?.constraint_name).toBe("usage_daily_pk");
+  });
+
   it("is idempotent — re-running migrateToLatest does not error and applies no new migrations", async () => {
     const migrator = new Migrator({
       db,

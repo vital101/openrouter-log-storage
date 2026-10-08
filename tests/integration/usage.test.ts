@@ -6,57 +6,39 @@ import { getTestDb, truncateAll } from "../fixtures/db.js";
 import { createTestApp } from "../fixtures/app.js";
 import type { Database } from "../../src/types.js";
 
-async function seedGeneration(
-  traceId: string,
-  opts: {
-    requestModel?: string;
-    startTime: Date;
-    inputTokens?: number;
-    outputTokens?: number;
-    cachedTokens?: number;
-    reasoningTokens?: number;
-    totalCost?: number;
-  },
-): Promise<void> {
+async function seedUsageDaily(opts: {
+  day: string;
+  model: string;
+  calls?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  totalCost?: number;
+}): Promise<void> {
   const db = getTestDb();
   await db
-    .insertInto("llm_generations")
+    .insertInto("usage_daily")
     .values({
-      trace_id: traceId,
-      span_id: `span-${opts.startTime.getTime()}-${Math.random()}`,
-      start_time: opts.startTime,
-      request_model: opts.requestModel ?? "model-a",
+      day: opts.day,
+      model: opts.model,
+      calls: opts.calls ?? 1,
       input_tokens: opts.inputTokens ?? 0,
       output_tokens: opts.outputTokens ?? 0,
       cached_tokens: opts.cachedTokens ?? 0,
       reasoning_tokens: opts.reasoningTokens ?? 0,
-      total_tokens:
-        (opts.inputTokens ?? 0) +
-        (opts.outputTokens ?? 0) +
-        (opts.cachedTokens ?? 0) +
-        (opts.reasoningTokens ?? 0),
+      total_tokens: opts.totalTokens ?? 0,
       total_cost: opts.totalCost ?? 0,
     })
     .execute();
 }
 
-async function seedTrace(id: string): Promise<string> {
-  const db = getTestDb();
-  const result = await db
-    .insertInto("traces")
-    .values({ openrouter_trace_id: id })
-    .returning("id")
-    .executeTakeFirstOrThrow();
-  return result.id;
-}
-
-const OLD_DATE = new Date("2020-01-01T00:00:00Z");
-
-function daysAgo(n: number): Date {
+function daysAgo(n: number): string {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - n);
   d.setUTCHours(0, 0, 0, 0);
-  return d;
+  return d.toISOString().slice(0, 10);
 }
 
 describe("GET /usage", () => {
@@ -65,32 +47,28 @@ describe("GET /usage", () => {
   });
 
   it("returns an HTML page with per-model per-day totals", async () => {
-    const db = getTestDb();
-    const traceId = await seedTrace("usage-trace-1");
     const day1 = daysAgo(1);
-    await seedGeneration(traceId, {
-      requestModel: "model-a",
-      startTime: day1,
-      inputTokens: 100,
-      outputTokens: 50,
+    await seedUsageDaily({
+      day: day1,
+      model: "model-a",
+      calls: 2,
+      inputTokens: 110,
+      outputTokens: 55,
       cachedTokens: 25,
       reasoningTokens: 5,
+      totalTokens: 195,
       totalCost: 0.1234,
     });
-    await seedGeneration(traceId, {
-      requestModel: "model-a",
-      startTime: day1,
-      inputTokens: 10,
-      outputTokens: 5,
-    });
-    await seedGeneration(traceId, {
-      requestModel: "model-b",
-      startTime: day1,
+    await seedUsageDaily({
+      day: day1,
+      model: "model-b",
+      calls: 1,
       inputTokens: 1000,
       outputTokens: 500,
+      totalTokens: 1500,
     });
 
-    const app = createTestApp({ db });
+    const app = createTestApp({ db: getTestDb() });
     const res = await request(app).get("/usage");
 
     expect(res.status).toBe(200);
@@ -103,18 +81,19 @@ describe("GET /usage", () => {
     expect(res.text).toContain("55");
     expect(res.text).toContain("1,000");
     expect(res.text).toContain("$0.1234");
+    expect(res.text).toContain("3");
   });
 
-  it("excludes generations outside the 30-day window", async () => {
-    const db = getTestDb();
-    const traceId = await seedTrace("usage-trace-2");
-    await seedGeneration(traceId, {
-      requestModel: "ancient-model",
-      startTime: OLD_DATE,
+  it("excludes buckets outside the 30-day window", async () => {
+    await seedUsageDaily({
+      day: "2020-01-01",
+      model: "ancient-model",
+      calls: 1,
       inputTokens: 9999,
+      totalTokens: 9999,
     });
 
-    const app = createTestApp({ db });
+    const app = createTestApp({ db: getTestDb() });
     const res = await request(app).get("/usage");
 
     expect(res.status).toBe(200);
@@ -123,17 +102,14 @@ describe("GET /usage", () => {
   });
 
   it("groups by day and orders by day desc, calls desc", async () => {
-    const db = getTestDb();
-    const traceId = await seedTrace("usage-trace-3");
-    await seedGeneration(traceId, { requestModel: "model-x", startTime: daysAgo(2) });
-    await seedGeneration(traceId, { requestModel: "model-x", startTime: daysAgo(1) });
-    await seedGeneration(traceId, { requestModel: "model-x", startTime: daysAgo(1) });
+    await seedUsageDaily({ day: daysAgo(2), model: "model-x", calls: 1 });
+    await seedUsageDaily({ day: daysAgo(1), model: "model-x", calls: 2 });
 
-    const app = createTestApp({ db });
+    const app = createTestApp({ db: getTestDb() });
     const res = await request(app).get("/usage");
 
-    const day2 = daysAgo(2).toISOString().slice(0, 10);
-    const day1 = daysAgo(1).toISOString().slice(0, 10);
+    const day2 = daysAgo(2);
+    const day1 = daysAgo(1);
     const idxDay2 = res.text.indexOf(day2);
     const idxDay1 = res.text.indexOf(day1);
     expect(idxDay1).toBeGreaterThan(-1);
@@ -141,9 +117,21 @@ describe("GET /usage", () => {
     expect(idxDay1).toBeLessThan(idxDay2);
   });
 
+  it("orders same-day rows by calls desc", async () => {
+    const day1 = daysAgo(1);
+    await seedUsageDaily({ day: day1, model: "model-low", calls: 1 });
+    await seedUsageDaily({ day: day1, model: "model-high", calls: 9 });
+
+    const app = createTestApp({ db: getTestDb() });
+    const res = await request(app).get("/usage");
+
+    expect(res.text.indexOf("model-high")).toBeLessThan(
+      res.text.indexOf("model-low"),
+    );
+  });
+
   it("handles an empty table", async () => {
-    const db = getTestDb();
-    const app = createTestApp({ db });
+    const app = createTestApp({ db: getTestDb() });
     const res = await request(app).get("/usage");
     expect(res.status).toBe(200);
     expect(res.text).toContain("OpenRouter Usage");
@@ -151,14 +139,13 @@ describe("GET /usage", () => {
   });
 
   it("escapes HTML in model names", async () => {
-    const db = getTestDb();
-    const traceId = await seedTrace("usage-trace-4");
-    await seedGeneration(traceId, {
-      requestModel: "<script>alert(1)</script>",
-      startTime: daysAgo(1),
+    await seedUsageDaily({
+      day: daysAgo(1),
+      model: "<script>alert(1)</script>",
+      calls: 1,
     });
 
-    const app = createTestApp({ db });
+    const app = createTestApp({ db: getTestDb() });
     const res = await request(app).get("/usage");
 
     expect(res.text).not.toContain("<script>alert(1)</script>");

@@ -1,7 +1,32 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { sql } from "kysely";
 import { getTestDb, seedRawEvent, truncateAll } from "../fixtures/db.js";
 import { storeParsedTraces } from "../../src/worker/store.js";
 import { makeParsedTraceFor } from "../fixtures/otel_payloads.js";
+
+interface UsageDailyRow {
+  day: string;
+  model: string;
+  calls: string;
+  input_tokens: string;
+  output_tokens: string;
+  cached_tokens: string;
+  reasoning_tokens: string;
+  total_tokens: string;
+  total_cost: string;
+}
+
+async function selectUsageDaily(): Promise<UsageDailyRow[]> {
+  const result = await sql<UsageDailyRow>`
+    SELECT day::text AS day, model, calls::text AS calls,
+           input_tokens::text AS input_tokens, output_tokens::text AS output_tokens,
+           cached_tokens::text AS cached_tokens, reasoning_tokens::text AS reasoning_tokens,
+           total_tokens::text AS total_tokens, total_cost::text AS total_cost
+    FROM usage_daily
+    ORDER BY day, model
+  `.execute(getTestDb());
+  return result.rows;
+}
 
 describe("storeParsedTraces", () => {
   beforeEach(async () => {
@@ -210,5 +235,92 @@ describe("storeParsedTraces", () => {
 
     const traces = await db.selectFrom("traces").selectAll().execute();
     expect(traces).toHaveLength(0);
+  });
+
+  describe("usage_daily rollup", () => {
+    it("maintains buckets for stored generations", async () => {
+      const db = getTestDb();
+      const rawEventId = await seedRawEvent({});
+      await storeParsedTraces(db, rawEventId, makeParsedTraceFor("or-rollup-1", ["span-A", "span-B"]));
+
+      const rows = await selectUsageDaily();
+      expect(rows).toEqual([
+        {
+          day: "2023-11-14",
+          model: "gpt-4o",
+          calls: "2",
+          input_tokens: "200",
+          output_tokens: "100",
+          cached_tokens: "0",
+          reasoning_tokens: "0",
+          total_tokens: "300",
+          total_cost: "0.00600000",
+        },
+      ]);
+    });
+
+    it("re-emitting the same spans does not double count", async () => {
+      const db = getTestDb();
+      const rawEventId = await seedRawEvent({});
+      const parsed = makeParsedTraceFor("or-rollup-2", ["span-A", "span-B"]);
+      await storeParsedTraces(db, rawEventId, parsed);
+      await storeParsedTraces(db, rawEventId, parsed);
+
+      const rows = await selectUsageDaily();
+      expect(rows[0]?.calls).toBe("2");
+    });
+
+    it("shrinks the bucket when a re-emit removes spans", async () => {
+      const db = getTestDb();
+      const rawEventId = await seedRawEvent({});
+      await storeParsedTraces(db, rawEventId, makeParsedTraceFor("or-rollup-3", ["span-A", "span-B", "span-C"]));
+      await storeParsedTraces(db, rawEventId, makeParsedTraceFor("or-rollup-3", ["span-A"]));
+
+      const rows = await selectUsageDaily();
+      expect(rows[0]?.calls).toBe("1");
+      expect(rows[0]?.input_tokens).toBe("100");
+    });
+
+    it("splits buckets by UTC day and request model", async () => {
+      const db = getTestDb();
+      const rawEventId = await seedRawEvent({});
+      const parsed = makeParsedTraceFor("or-rollup-4", ["span-A", "span-B"]);
+      if (parsed[0]) {
+        const [g0, g1] = parsed[0].generations;
+        if (g0) g0.startTime = new Date(1_700_000_000_000);
+        if (g1) {
+          g1.startTime = new Date(1_700_000_000_000 + 2 * 86_400_000);
+          g1.requestModel = "claude-3";
+        }
+      }
+      await storeParsedTraces(db, rawEventId, parsed);
+
+      const rows = await selectUsageDaily();
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({ day: "2023-11-14", model: "gpt-4o", calls: "1" });
+      expect(rows[1]).toMatchObject({ day: "2023-11-16", model: "claude-3", calls: "1" });
+    });
+
+    it("buckets null-model generations under '(unknown)' and skips null start_time", async () => {
+      const db = getTestDb();
+      const rawEventId = await seedRawEvent({});
+      const parsed = makeParsedTraceFor("or-rollup-5", ["span-A", "span-B"]);
+      if (parsed[0]) {
+        const [g0, g1] = parsed[0].generations;
+        if (g0) g0.startTime = null;
+        if (g1) g1.requestModel = null;
+      }
+      await storeParsedTraces(db, rawEventId, parsed);
+
+      const rows = await selectUsageDaily();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        model: "(unknown)",
+        calls: "1",
+        input_tokens: "100",
+        output_tokens: "50",
+        total_tokens: "150",
+      });
+    });
   });
 });
