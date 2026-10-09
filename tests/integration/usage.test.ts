@@ -206,8 +206,8 @@ describe("GET /usage", () => {
     await seedUsageDaily({
       day: daysAgo(1),
       model: "model-a",
-      calls: 2,
-      statusCounts: { "1": 1, "2": 1 },
+      calls: 3,
+      statusCounts: { "1": 1, "2": 1, "(none)": 1 },
       finishCounts: { stop: 1, length: 1 },
       responseCounts: { "model-a": 1, "model-a-mini": 1 },
       providerCounts: { openai: 2 },
@@ -218,7 +218,7 @@ describe("GET /usage", () => {
 
     expect(res.text).toContain("Outcomes");
     expect(res.text).toContain("length");
-    expect(res.text).toContain("50.0%");
+    expect(res.text).toContain("33.3%");
     expect(res.text).toContain("Model drift");
     expect(res.text).toContain("model-a-mini");
   });

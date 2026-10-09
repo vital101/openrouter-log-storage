@@ -287,7 +287,7 @@ function card(title: string, value: string, sub?: string | null): string {
   return `<div class="card"><div class="card-title">${escapeHtml(title)}</div><div class="card-value">${value}</div>${subHtml}</div>`;
 }
 
-function renderSummaryCards(models: ModelAgg[], prev: { calls: number; cost: number } | undefined): string {
+function renderSummaryCards(models: ModelAgg[]): string {
   const totals = models.reduce(
     (acc, m) => {
       acc.calls += m.calls;
@@ -300,8 +300,8 @@ function renderSummaryCards(models: ModelAgg[], prev: { calls: number; cost: num
     { calls: 0, cost: 0, inputTokens: 0, cachedTokens: 0, totalTokens: 0 },
   );
   const cards = [
-    card("Total calls", formatNumber(String(totals.calls)), deltaPct(totals.calls, prev?.calls)),
-    card("Total cost", formatCost(String(totals.cost)), deltaPct(totals.cost, prev?.cost)),
+    card("Total calls", formatNumber(String(totals.calls))),
+    card("Total cost", formatCost(String(totals.cost))),
     card("Cache hit rate", pct(totals.cachedTokens, totals.inputTokens)),
     card("Avg cost / call", formatCost(String(totals.calls > 0 ? totals.cost / totals.calls : 0))),
     card("Total tokens", formatNumber(String(totals.totalTokens))),
@@ -409,7 +409,7 @@ function renderOutcomeSection(models: ModelAgg[]): string {
         .sort((a, b) => b[1] - a[1])
         .map(([label, value]) => ({ label, value }));
       const errors = Object.entries(m.statusCounts)
-        .filter(([code]) => code !== "0" && code !== "1")
+        .filter(([code]) => code !== "0" && code !== "1" && code !== "(none)")
         .reduce((acc, [, value]) => acc + value, 0);
       return `<tr>
         <td>${escapeHtml(m.model)}</td>
@@ -480,8 +480,6 @@ function renderUsagePage(
   topCalls: TopCallRow[],
   days: number,
 ): string {
-  const prev = daily[daily.length - 2];
-  const prevTotals = prev ? { calls: prev.calls, cost: prev.cost } : undefined;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -518,7 +516,7 @@ function renderUsagePage(
 <body>
   <h1>OpenRouter Usage — last ${days} days</h1>
   <div class="window-note">Window: ?days=1..90 (defaults to trace retention)</div>
-  ${renderSummaryCards(models, prevTotals)}
+  ${renderSummaryCards(models)}
   ${renderTrendSection(daily)}
   ${renderHeatmapSection(heatmap)}
   ${renderModelTable(models)}
@@ -562,11 +560,11 @@ export function usageRouter(db: Kysely<Database>, retentionDays: number) {
 
       const heatmap = await sql<HeatmapRow>`
         SELECT
-          extract(isodow FROM hour)::int AS dow,
-          extract(hour FROM hour)::int AS hour,
+          extract(isodow FROM hour AT TIME ZONE 'UTC')::int AS dow,
+          extract(hour FROM hour AT TIME ZONE 'UTC')::int AS hour,
           SUM(calls)::text AS calls
         FROM usage_hourly
-        WHERE hour >= date_trunc('day', now() - ${days} * interval '1 day')
+        WHERE hour >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') - ${days} * interval '1 day'
         GROUP BY 1, 2
       `.execute(db);
 

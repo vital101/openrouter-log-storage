@@ -108,13 +108,6 @@ export async function up(db: Kysely<any>): Promise<void> {
     JOIN provider_mix p USING (day, model)
     JOIN response_mix r USING (day, model)
     ON CONFLICT (day, model) DO UPDATE SET
-      calls = EXCLUDED.calls,
-      input_tokens = EXCLUDED.input_tokens,
-      output_tokens = EXCLUDED.output_tokens,
-      cached_tokens = EXCLUDED.cached_tokens,
-      reasoning_tokens = EXCLUDED.reasoning_tokens,
-      total_tokens = EXCLUDED.total_tokens,
-      total_cost = EXCLUDED.total_cost,
       avg_duration_ms = EXCLUDED.avg_duration_ms,
       p50_duration_ms = EXCLUDED.p50_duration_ms,
       p95_duration_ms = EXCLUDED.p95_duration_ms,
