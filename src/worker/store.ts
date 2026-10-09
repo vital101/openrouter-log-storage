@@ -199,7 +199,9 @@ export async function storeParsedTraces(
         .execute();
     }
 
-    await refreshUsageDailyBuckets(db, [...spanIdsByTraceId.keys()]);
+    const touchedTraceIds = [...spanIdsByTraceId.keys()];
+    await refreshUsageDailyBuckets(db, touchedTraceIds);
+    await refreshUsageHourlyBuckets(db, touchedTraceIds);
   }
 }
 
@@ -216,8 +218,117 @@ async function refreshUsageDailyBuckets(
       FROM llm_generations
       WHERE trace_id = ANY(${traceIds}::uuid[])
     ),
+    bounds AS (
+      SELECT
+        min(day)::timestamp AT TIME ZONE 'UTC' AS min_t,
+        (max(day)::timestamp AT TIME ZONE 'UTC') + interval '1 day' AS max_t
+      FROM touched
+    ),
+    base AS (
+      SELECT
+        (g.start_time AT TIME ZONE 'UTC')::date AS day,
+        COALESCE(g.request_model, '(unknown)') AS model,
+        g.duration_ms,
+        COALESCE(g.status_code::text, '(none)') AS status_key,
+        COALESCE(g.finish_reason, '(none)') AS finish_key,
+        COALESCE(g.provider_name, '(unknown)') AS provider_key,
+        COALESCE(g.response_model, '(unknown)') AS response_key,
+        length(g.prompt::text) AS prompt_len,
+        length(g.completion::text) AS completion_len,
+        g.input_tokens, g.output_tokens, g.cached_tokens, g.reasoning_tokens,
+        g.total_tokens, g.total_cost
+      FROM llm_generations g, bounds b
+      WHERE g.start_time >= b.min_t AND g.start_time < b.max_t
+    ),
     agg AS (
-      SELECT (g.start_time AT TIME ZONE 'UTC')::date AS day,
+      SELECT day, model,
+             COUNT(*)::bigint AS calls,
+             COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+             COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+             COALESCE(SUM(cached_tokens), 0)::bigint AS cached_tokens,
+             COALESCE(SUM(reasoning_tokens), 0)::bigint AS reasoning_tokens,
+             COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
+             COALESCE(SUM(total_cost), 0) AS total_cost,
+             AVG(duration_ms) AS avg_duration_ms,
+             percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms)::bigint AS p50_duration_ms,
+             percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)::bigint AS p95_duration_ms,
+             COALESCE(SUM(prompt_len), 0)::bigint AS prompt_chars,
+             COALESCE(SUM(completion_len), 0)::bigint AS completion_chars
+      FROM base GROUP BY day, model
+    ),
+    status_mix AS (
+      SELECT day, model, jsonb_object_agg(status_key, cnt) AS status_counts
+      FROM (SELECT day, model, status_key, COUNT(*)::bigint AS cnt FROM base GROUP BY 1,2,3) t
+      GROUP BY day, model
+    ),
+    finish_mix AS (
+      SELECT day, model, jsonb_object_agg(finish_key, cnt) AS finish_reason_counts
+      FROM (SELECT day, model, finish_key, COUNT(*)::bigint AS cnt FROM base GROUP BY 1,2,3) t
+      GROUP BY day, model
+    ),
+    provider_mix AS (
+      SELECT day, model, jsonb_object_agg(provider_key, cnt) AS provider_counts
+      FROM (SELECT day, model, provider_key, COUNT(*)::bigint AS cnt FROM base GROUP BY 1,2,3) t
+      GROUP BY day, model
+    ),
+    response_mix AS (
+      SELECT day, model, jsonb_object_agg(response_key, cnt) AS response_model_counts
+      FROM (SELECT day, model, response_key, COUNT(*)::bigint AS cnt FROM base GROUP BY 1,2,3) t
+      GROUP BY day, model
+    )
+    INSERT INTO usage_daily (day, model, calls, input_tokens, output_tokens, cached_tokens, reasoning_tokens, total_tokens, total_cost,
+                              avg_duration_ms, p50_duration_ms, p95_duration_ms,
+                              status_counts, finish_reason_counts, provider_counts, response_model_counts,
+                              prompt_chars, completion_chars)
+    SELECT
+      a.day, a.model, a.calls, a.input_tokens, a.output_tokens, a.cached_tokens, a.reasoning_tokens, a.total_tokens, a.total_cost,
+      a.avg_duration_ms, a.p50_duration_ms, a.p95_duration_ms,
+      s.status_counts, f.finish_reason_counts, p.provider_counts, r.response_model_counts,
+      a.prompt_chars, a.completion_chars
+    FROM agg a
+    JOIN touched t USING (day, model)
+    JOIN status_mix s USING (day, model)
+    JOIN finish_mix f USING (day, model)
+    JOIN provider_mix p USING (day, model)
+    JOIN response_mix r USING (day, model)
+    ON CONFLICT (day, model) DO UPDATE SET
+      calls = EXCLUDED.calls,
+      input_tokens = EXCLUDED.input_tokens,
+      output_tokens = EXCLUDED.output_tokens,
+      cached_tokens = EXCLUDED.cached_tokens,
+      reasoning_tokens = EXCLUDED.reasoning_tokens,
+      total_tokens = EXCLUDED.total_tokens,
+      total_cost = EXCLUDED.total_cost,
+      avg_duration_ms = EXCLUDED.avg_duration_ms,
+      p50_duration_ms = EXCLUDED.p50_duration_ms,
+      p95_duration_ms = EXCLUDED.p95_duration_ms,
+      status_counts = EXCLUDED.status_counts,
+      finish_reason_counts = EXCLUDED.finish_reason_counts,
+      provider_counts = EXCLUDED.provider_counts,
+      response_model_counts = EXCLUDED.response_model_counts,
+      prompt_chars = EXCLUDED.prompt_chars,
+      completion_chars = EXCLUDED.completion_chars
+  `.execute(db);
+}
+
+async function refreshUsageHourlyBuckets(
+  db: Kysely<Database>,
+  traceIds: string[],
+): Promise<void> {
+  if (traceIds.length === 0) return;
+
+  await sql`
+    WITH touched AS (
+      SELECT DISTINCT date_trunc('hour', start_time AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS hour,
+             COALESCE(request_model, '(unknown)') AS model
+      FROM llm_generations
+      WHERE trace_id = ANY(${traceIds}::uuid[])
+    ),
+    bounds AS (
+      SELECT min(hour) AS min_h, max(hour) + interval '1 hour' AS max_h FROM touched
+    ),
+    agg AS (
+      SELECT date_trunc('hour', g.start_time AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS hour,
              COALESCE(g.request_model, '(unknown)') AS model,
              COUNT(*)::bigint AS calls,
              COALESCE(SUM(g.input_tokens), 0)::bigint AS input_tokens,
@@ -226,16 +337,15 @@ async function refreshUsageDailyBuckets(
              COALESCE(SUM(g.reasoning_tokens), 0)::bigint AS reasoning_tokens,
              COALESCE(SUM(g.total_tokens), 0)::bigint AS total_tokens,
              COALESCE(SUM(g.total_cost), 0) AS total_cost
-      FROM llm_generations g
-      WHERE g.start_time >= (SELECT (min(t.day)::timestamp AT TIME ZONE 'UTC') FROM touched t)
-        AND g.start_time < (SELECT ((max(t.day)::timestamp AT TIME ZONE 'UTC') + interval '1 day') FROM touched t)
+      FROM llm_generations g, bounds b
+      WHERE g.start_time >= b.min_h AND g.start_time < b.max_h
       GROUP BY 1, 2
     )
-    INSERT INTO usage_daily (day, model, calls, input_tokens, output_tokens, cached_tokens, reasoning_tokens, total_tokens, total_cost)
-    SELECT a.day, a.model, a.calls, a.input_tokens, a.output_tokens, a.cached_tokens, a.reasoning_tokens, a.total_tokens, a.total_cost
+    INSERT INTO usage_hourly (hour, model, calls, input_tokens, output_tokens, cached_tokens, reasoning_tokens, total_tokens, total_cost)
+    SELECT a.hour, a.model, a.calls, a.input_tokens, a.output_tokens, a.cached_tokens, a.reasoning_tokens, a.total_tokens, a.total_cost
     FROM agg a
-    JOIN touched t USING (day, model)
-    ON CONFLICT (day, model) DO UPDATE SET
+    JOIN touched t USING (hour, model)
+    ON CONFLICT (hour, model) DO UPDATE SET
       calls = EXCLUDED.calls,
       input_tokens = EXCLUDED.input_tokens,
       output_tokens = EXCLUDED.output_tokens,

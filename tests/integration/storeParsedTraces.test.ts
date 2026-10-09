@@ -14,6 +14,15 @@ interface UsageDailyRow {
   reasoning_tokens: string;
   total_tokens: string;
   total_cost: string;
+  avg_duration_ms: number | null;
+  p50_duration_ms: string | null;
+  p95_duration_ms: string | null;
+  status_counts: Record<string, number> | null;
+  finish_reason_counts: Record<string, number> | null;
+  provider_counts: Record<string, number> | null;
+  response_model_counts: Record<string, number> | null;
+  prompt_chars: string | null;
+  completion_chars: string | null;
 }
 
 async function selectUsageDaily(): Promise<UsageDailyRow[]> {
@@ -21,9 +30,30 @@ async function selectUsageDaily(): Promise<UsageDailyRow[]> {
     SELECT day::text AS day, model, calls::text AS calls,
            input_tokens::text AS input_tokens, output_tokens::text AS output_tokens,
            cached_tokens::text AS cached_tokens, reasoning_tokens::text AS reasoning_tokens,
-           total_tokens::text AS total_tokens, total_cost::text AS total_cost
+           total_tokens::text AS total_tokens, total_cost::text AS total_cost,
+           avg_duration_ms, p50_duration_ms::text AS p50_duration_ms,
+           p95_duration_ms::text AS p95_duration_ms,
+           status_counts, finish_reason_counts, provider_counts, response_model_counts,
+           prompt_chars::text AS prompt_chars, completion_chars::text AS completion_chars
     FROM usage_daily
     ORDER BY day, model
+  `.execute(getTestDb());
+  return result.rows;
+}
+
+interface UsageHourlyRow {
+  hour: string;
+  model: string;
+  calls: string;
+  total_cost: string;
+}
+
+async function selectUsageHourly(): Promise<UsageHourlyRow[]> {
+  const result = await sql<UsageHourlyRow>`
+    SELECT to_char(hour AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS hour,
+           model, calls::text AS calls, total_cost::text AS total_cost
+    FROM usage_hourly
+    ORDER BY hour, model
   `.execute(getTestDb());
   return result.rows;
 }
@@ -244,19 +274,27 @@ describe("storeParsedTraces", () => {
       await storeParsedTraces(db, rawEventId, makeParsedTraceFor("or-rollup-1", ["span-A", "span-B"]));
 
       const rows = await selectUsageDaily();
-      expect(rows).toEqual([
-        {
-          day: "2023-11-14",
-          model: "gpt-4o",
-          calls: "2",
-          input_tokens: "200",
-          output_tokens: "100",
-          cached_tokens: "0",
-          reasoning_tokens: "0",
-          total_tokens: "300",
-          total_cost: "0.00600000",
-        },
-      ]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        day: "2023-11-14",
+        model: "gpt-4o",
+        calls: "2",
+        input_tokens: "200",
+        output_tokens: "100",
+        cached_tokens: "0",
+        reasoning_tokens: "0",
+        total_tokens: "300",
+        total_cost: "0.00600000",
+        avg_duration_ms: 1000,
+        p50_duration_ms: "1000",
+        p95_duration_ms: "1000",
+        status_counts: { "1": 2 },
+        finish_reason_counts: { stop: 2 },
+        provider_counts: { openai: 2 },
+        response_model_counts: { "gpt-4o-2024-08-06": 2 },
+      });
+      expect(Number(rows[0]?.prompt_chars)).toBeGreaterThan(0);
+      expect(Number(rows[0]?.completion_chars)).toBeGreaterThan(0);
     });
 
     it("re-emitting the same spans does not double count", async () => {
@@ -321,6 +359,52 @@ describe("storeParsedTraces", () => {
         output_tokens: "50",
         total_tokens: "150",
       });
+    });
+  });
+
+  describe("usage_hourly rollup", () => {
+    it("maintains hourly buckets in UTC", async () => {
+      const db = getTestDb();
+      const rawEventId = await seedRawEvent({});
+      await storeParsedTraces(db, rawEventId, makeParsedTraceFor("or-hourly-1", ["span-A", "span-B"]));
+
+      const rows = await selectUsageHourly();
+      expect(rows).toEqual([
+        {
+          hour: "2023-11-14 22:00",
+          model: "gpt-4o",
+          calls: "2",
+          total_cost: "0.00600000",
+        },
+      ]);
+    });
+
+    it("re-emitting with fewer spans shrinks the hourly bucket", async () => {
+      const db = getTestDb();
+      const rawEventId = await seedRawEvent({});
+      await storeParsedTraces(db, rawEventId, makeParsedTraceFor("or-hourly-2", ["span-A", "span-B"]));
+      await storeParsedTraces(db, rawEventId, makeParsedTraceFor("or-hourly-2", ["span-A"]));
+
+      const rows = await selectUsageHourly();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.calls).toBe("1");
+    });
+
+    it("splits buckets on UTC hour boundaries", async () => {
+      const db = getTestDb();
+      const rawEventId = await seedRawEvent({});
+      const parsed = makeParsedTraceFor("or-hourly-3", ["span-A", "span-B"]);
+      if (parsed[0]) {
+        const [g0, g1] = parsed[0].generations;
+        if (g0) g0.startTime = new Date(1_700_000_000_000);
+        if (g1) g1.startTime = new Date(1_700_000_000_000 + 3_600_000);
+      }
+      await storeParsedTraces(db, rawEventId, parsed);
+
+      const rows = await selectUsageHourly();
+      expect(rows).toHaveLength(2);
+      expect(rows[0]?.hour).toBe("2023-11-14 22:00");
+      expect(rows[1]?.hour).toBe("2023-11-14 23:00");
     });
   });
 });

@@ -129,6 +129,46 @@ describe("migrations", () => {
     expect(pk.rows[0]?.constraint_name).toBe("usage_daily_pk");
   });
 
+  it("adds dashboard aggregates to usage_daily and creates usage_hourly", async () => {
+    const cols = await sql<{ column_name: string }>`
+      SELECT column_name FROM information_schema.columns WHERE table_name = 'usage_daily'
+    `.execute(db);
+    const names = cols.rows.map((c) => c.column_name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "avg_duration_ms",
+        "p50_duration_ms",
+        "p95_duration_ms",
+        "status_counts",
+        "finish_reason_counts",
+        "provider_counts",
+        "response_model_counts",
+        "prompt_chars",
+        "completion_chars",
+      ]),
+    );
+
+    const tables = await sql<{ table_name: string }>`
+      SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'
+    `.execute(db);
+    expect(tables.rows.map((t) => t.table_name)).toContain("usage_hourly");
+
+    const pk = await sql<{ constraint_name: string }>`
+      SELECT constraint_name FROM information_schema.table_constraints
+      WHERE table_name = 'usage_hourly' AND constraint_type = 'PRIMARY KEY'
+    `.execute(db);
+    expect(pk.rows[0]?.constraint_name).toBe("usage_hourly_pk");
+  });
+
+  it("creates the partial total_cost index on llm_generations", async () => {
+    const rows = await sql<{ indexname: string; indexdef: string }>`
+      SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'llm_generations'
+    `.execute(db);
+    const idx = rows.rows.find((i) => i.indexname === "llm_generations_total_cost_idx");
+    expect(idx).toBeDefined();
+    expect(idx?.indexdef).toContain("WHERE");
+  });
+
   it("is idempotent — re-running migrateToLatest does not error and applies no new migrations", async () => {
     const migrator = new Migrator({
       db,

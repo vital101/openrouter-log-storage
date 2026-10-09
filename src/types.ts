@@ -79,13 +79,34 @@ export interface LlmGenerationsTable {
 export interface UsageDailyTable {
   day: ColumnType<string, string, never>;
   model: ColumnType<string, string, never>;
-  calls: ColumnType<string, number | string, never>;
-  input_tokens: ColumnType<string, number | string, never>;
-  output_tokens: ColumnType<string, number | string, never>;
-  cached_tokens: ColumnType<string, number | string, never>;
-  reasoning_tokens: ColumnType<string, number | string, never>;
-  total_tokens: ColumnType<string, number | string, never>;
-  total_cost: ColumnType<string, number | string, never>;
+  calls: ColumnType<string, number | string | undefined, never>;
+  input_tokens: ColumnType<string, number | string | undefined, never>;
+  output_tokens: ColumnType<string, number | string | undefined, never>;
+  cached_tokens: ColumnType<string, number | string | undefined, never>;
+  reasoning_tokens: ColumnType<string, number | string | undefined, never>;
+  total_tokens: ColumnType<string, number | string | undefined, never>;
+  total_cost: ColumnType<string, number | string | undefined, never>;
+  avg_duration_ms: ColumnType<number | null, number | null | undefined, never>;
+  p50_duration_ms: ColumnType<string | null, number | string | null | undefined, never>;
+  p95_duration_ms: ColumnType<string | null, number | string | null | undefined, never>;
+  status_counts: ColumnType<unknown | null, unknown | null | undefined, never>;
+  finish_reason_counts: ColumnType<unknown | null, unknown | null | undefined, never>;
+  provider_counts: ColumnType<unknown | null, unknown | null | undefined, never>;
+  response_model_counts: ColumnType<unknown | null, unknown | null | undefined, never>;
+  prompt_chars: ColumnType<string | null, number | string | null | undefined, never>;
+  completion_chars: ColumnType<string | null, number | string | null | undefined, never>;
+}
+
+export interface UsageHourlyTable {
+  hour: ColumnType<Date, Date | string, never>;
+  model: ColumnType<string, string, never>;
+  calls: ColumnType<string, number | string | undefined, never>;
+  input_tokens: ColumnType<string, number | string | undefined, never>;
+  output_tokens: ColumnType<string, number | string | undefined, never>;
+  cached_tokens: ColumnType<string, number | string | undefined, never>;
+  reasoning_tokens: ColumnType<string, number | string | undefined, never>;
+  total_tokens: ColumnType<string, number | string | undefined, never>;
+  total_cost: ColumnType<string, number | string | undefined, never>;
 }
 
 export interface Database {
@@ -93,4 +114,5 @@ export interface Database {
   traces: TracesTable;
   llm_generations: LlmGenerationsTable;
   usage_daily: UsageDailyTable;
+  usage_hourly: UsageHourlyTable;
 }
