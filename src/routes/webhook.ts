@@ -2,6 +2,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import type { Kysely } from "kysely";
 import type { Database } from "../types.js";
+import { sanitizeJsonValue } from "../sanitize.js";
 
 const TEST_CONNECTION_HEADER = "x-test-connection";
 
@@ -36,7 +37,7 @@ export function webhookRouter(db: Kysely<Database>, authHeaderName: string, rate
     const result = await db
       .insertInto("raw_events")
       .values({
-        payload: JSON.stringify(payload),
+        payload: JSON.stringify(sanitizeJsonValue(payload)),
         auth_header_name: authHeaderName,
       })
       .returning("id")

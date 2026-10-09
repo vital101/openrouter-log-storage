@@ -495,6 +495,101 @@ describe("parseOtelPayload", () => {
     });
   });
 
+  describe("invalid unicode sanitization", () => {
+    it("replaces NUL escapes materialized by inner JSON parsing", () => {
+      const result = parseOtelPayload({
+        resourceSpans: [
+          makeResourceSpan({
+            scopeSpans: [
+              makeScopeSpan({
+                spans: [
+                  makeSpan({
+                    attributes: [
+                      {
+                        key: "gen_ai.prompt",
+                        value: {
+                          stringValue: '{"content":"29.8.2\\n \\u0000tail"}',
+                        },
+                      },
+                    ],
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      });
+      expect(result[0]?.generations[0]?.prompt).toEqual({
+        content: "29.8.2\n \uFFFDtail",
+      });
+    });
+
+    it("replaces lone surrogates materialized by inner JSON parsing", () => {
+      const result = parseOtelPayload({
+        resourceSpans: [
+          makeResourceSpan({
+            scopeSpans: [
+              makeScopeSpan({
+                spans: [
+                  makeSpan({
+                    attributes: [
+                      {
+                        key: "gen_ai.prompt",
+                        value: { stringValue: '{"content":"a\\ud800b"}' },
+                      },
+                    ],
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      });
+      expect(result[0]?.generations[0]?.prompt).toEqual({
+        content: "a\uFFFDb",
+      });
+    });
+
+    it("sanitizes actual NUL characters in an unparseable string fallback", () => {
+      const result = parseOtelPayload({
+        resourceSpans: [
+          makeResourceSpan({
+            scopeSpans: [
+              makeScopeSpan({
+                spans: [
+                  makeSpan({
+                    attributes: [
+                      {
+                        key: "gen_ai.completion",
+                        value: { stringValue: "bad\u0000json" },
+                      },
+                    ],
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      });
+      expect(result[0]?.generations[0]?.completion).toBe('"bad\uFFFDjson"');
+    });
+
+    it("sanitizes string attributes used as metadata and tags", () => {
+      const result = parseOtelPayload({
+        resourceSpans: [
+          makeResourceSpan({
+            resourceAttributes: [
+              makeStringAttr("trace.metadata.custom", "x\u0000y"),
+              makeStringAttr("trace.tags", '["a\\u0000b"]'),
+            ],
+          }),
+        ],
+      });
+      expect(result[0]?.trace.metadata).toEqual({ custom: "x\uFFFDy" });
+      expect(result[0]?.trace.tags).toEqual(["a\uFFFDb"]);
+    });
+  });
+
   describe("coerceNumber", () => {
     it("passes through numbers", () => {
       const result = parseOtelPayload({

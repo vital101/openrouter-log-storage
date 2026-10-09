@@ -62,6 +62,51 @@ describe("processBatch", () => {
     expect(generations[0]?.span_id).toBe("span-A");
   });
 
+  it("processes a payload whose inner JSON contains NUL and lone surrogates", async () => {
+    const db = getTestDb();
+    const payload = makeOtelPayload({
+      resourceSpans: [
+        makeResourceSpan({
+          resourceAttributes: [
+            makeStringAttr("openrouter.trace.id", "or-unicode"),
+          ],
+          scopeSpans: [
+            makeScopeSpan({
+              spans: [
+                makeSpan({
+                  spanId: "span-unicode",
+                  attributes: [
+                    {
+                      key: "gen_ai.prompt",
+                      value: {
+                        stringValue: '{"content":"29.8.2\\n \\u0000tail"}',
+                      },
+                    },
+                    {
+                      key: "gen_ai.completion",
+                      value: { stringValue: '["ok\\ud800"]' },
+                    },
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
+    await seedRawEvent(payload);
+
+    const result = await processBatch({ db, logger, ...DEPS });
+    expect(result).toEqual({ processed: 1, failed: 0 });
+
+    const generation = await db
+      .selectFrom("llm_generations")
+      .select(["prompt", "completion"])
+      .executeTakeFirstOrThrow();
+    expect(generation.prompt).toEqual({ content: "29.8.2\n \uFFFDtail" });
+    expect(generation.completion).toEqual(["ok\uFFFD"]);
+  });
+
   it("on parse failure increments attempt_count and schedules a backoff", async () => {
     const db = getTestDb();
     await seedRawEvent({ not: "a valid otel payload" });

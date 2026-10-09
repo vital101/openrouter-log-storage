@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { sanitizeJsonValue, sanitizeString } from "../sanitize.js";
 
 export interface ParsedTrace {
   openrouterTraceId: string;
@@ -65,7 +66,9 @@ function getAttrValue(
 ): unknown {
   if (!value) return null;
 
-  if (typeof value.stringValue === "string") return value.stringValue;
+  if (typeof value.stringValue === "string") {
+    return sanitizeString(value.stringValue);
+  }
   if (typeof value.intValue === "number") return value.intValue;
   if (typeof value.intValue === "string") return Number(value.intValue);
   if (typeof value.doubleValue === "number") return value.doubleValue;
@@ -153,12 +156,12 @@ function parseUnixNano(nano: string | undefined): Date | null {
 function tryParseJson(raw: unknown): unknown {
   if (typeof raw === "string") {
     try {
-      return JSON.parse(raw);
+      return sanitizeJsonValue(JSON.parse(raw));
     } catch {
-      return JSON.stringify(raw);
+      return JSON.stringify(sanitizeString(raw));
     }
   }
-  return raw;
+  return sanitizeJsonValue(raw);
 }
 
 function coerceNumber(value: unknown): number | null {

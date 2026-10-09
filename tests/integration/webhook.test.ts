@@ -141,6 +141,26 @@ describe("POST /webhook/openrouter", () => {
     expect(res.body).toEqual({ error: "payload_too_large" });
   });
 
+  it("sanitizes unicode that Postgres cannot store before persisting", async () => {
+    const app = createTestApp({ db: getTestDb(), config });
+    const body = JSON.parse(
+      '{"text":"a\\u0000b","lone":"\\ud800"}',
+    ) as Record<string, unknown>;
+    const res = await request(app)
+      .post("/webhook/openrouter")
+      .set(HEADER, SECRET)
+      .send(body);
+    expect(res.status).toBe(200);
+
+    const db = getTestDb();
+    const row = await db
+      .selectFrom("raw_events")
+      .select(["payload"])
+      .where("id", "=", Number(res.body.id))
+      .executeTakeFirstOrThrow();
+    expect(row.payload).toEqual({ text: "a\uFFFDb", lone: "\uFFFD" });
+  });
+
   it("honors a custom WEBHOOK_SECRET_HEADER for auth and records it", async () => {
     const custom = buildConfig({
       WEBHOOK_SECRET: SECRET,
