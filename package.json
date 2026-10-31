@@ -4,13 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "dev:worker": "tsx watch src/worker/index.ts",
-    "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/server.js",
-    "start:worker": "node dist/worker/index.js",
-    "cleanup": "tsx src/cleanup.ts",
-    "migrate": "tsx src/migrate.ts",
+    "dev": "bun --hot src/server.ts",
+    "dev:worker": "bun --hot src/worker/index.ts",
+    "start": "bun src/server.ts",
+    "start:worker": "bun src/worker/index.ts",
+    "cleanup": "bun src/cleanup.ts",
+    "migrate": "bun src/migrate.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -27,7 +26,6 @@
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
-    "tsx": "^4.23.15",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -42,11 +40,11 @@
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },
-  "allowScripts": {
-    "esbuild@0.28.1": true,
-    "fsevents@2.3.3": true,
-    "cpu-features@0.0.10": true,
-    "protobufjs@7.6.5": true,
-    "ssh2@1.17.0": true
-  }
+  "trustedDependencies": [
+    "esbuild",
+    "fsevents",
+    "cpu-features",
+    "protobufjs",
+    "ssh2"
+  ]
 }
