@@ -4,6 +4,10 @@
 // Usage: node bench/measure.mjs <node|bun> <label>
 // Env: DATABASE_URL, WEBHOOK_SECRET required (point at a scratch DB!)
 import { spawn, execFileSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const LOAD_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "load.mjs");
 
 const RUNTIME = process.argv[2] || "node";
 const LABEL = process.argv[3] || RUNTIME;
@@ -74,7 +78,7 @@ for (let i = 0; i < 6; i++) {
 
 // burst: fire load, sample every 500ms
 const burst = { server: [], worker: [] };
-const loadProc = spawn("node", ["bench/load.mjs",
+const loadProc = spawn("node", [LOAD_SCRIPT,
   `http://localhost:${PORT}/webhook/openrouter`,
   process.env.WEBHOOK_SECRET, RPS, DURATION, "16"], { stdio: "pipe" });
 let loadOut = "";

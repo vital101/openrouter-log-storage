@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "test:coverage": "bun test --coverage && node scripts/check-coverage.mjs",
+    "test:coverage": "bun test --coverage && bun scripts/check-coverage.mjs",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
     "test:e2e": "bun test tests/e2e"
