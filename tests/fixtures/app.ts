@@ -1,4 +1,4 @@
-import { pino } from "pino";
+import { createLogger } from "../../src/logger.js";
 import type { Kysely } from "kysely";
 import { createApp } from "../../src/server.js";
 import type { Handler } from "../../src/http.js";
@@ -33,6 +33,6 @@ export interface TestAppOptions {
 
 export function createTestApp(opts: TestAppOptions): Handler {
   const config: Config = { ...DEFAULT_CONFIG, ...opts.config };
-  const logger = pino({ level: "silent" });
+  const logger = createLogger("silent");
   return createApp(opts.db, config, logger);
 }

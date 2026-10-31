@@ -1,6 +1,6 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Logger } from "pino";
+import type { Logger } from "./logger.js";
 import type { Kysely } from "kysely";
 import { loadConfig, type Config } from "./config.js";
 import { createDb, waitForDb } from "./db.js";

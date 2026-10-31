@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { pino } from "pino";
+import { createLogger } from "../../src/logger.js";
 import { getTestDb, truncateAll } from "../fixtures/db.js";
 import { createTestApp } from "../fixtures/app.js";
 import { call } from "../fixtures/http.js";
@@ -31,7 +31,7 @@ const TEST_CONFIG: Config = {
   WEBHOOK_RATE_LIMIT_PER_MIN: 0,
 };
 
-const logger = pino({ level: "silent" });
+const logger = createLogger("silent");
 
 describe("server + worker e2e", () => {
   beforeEach(async () => {

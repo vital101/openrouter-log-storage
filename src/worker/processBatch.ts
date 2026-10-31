@@ -1,7 +1,7 @@
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 import type { Database } from "../types.js";
-import type { Logger } from "pino";
+import type { Logger } from "../logger.js";
 import { parseOtelPayload } from "./otel.js";
 import { storeParsedTraces } from "./store.js";
 

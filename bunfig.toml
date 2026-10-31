@@ -15,6 +15,5 @@ coveragePathIgnorePatterns = [
   "**/src/server.ts",
   "**/src/worker/index.ts",
   "**/src/migrate.ts",
-  "**/src/logger.ts",
   "**/src/types.ts",
 ]

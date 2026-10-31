@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { pino } from "pino";
+import { createLogger } from "../../src/logger.js";
 import { getTestDb, seedRawEvent, truncateAll } from "../fixtures/db.js";
 import { processBatch } from "../../src/worker/processBatch.js";
 import {
@@ -19,7 +19,7 @@ const DEPS = {
   concurrency: 1,
 };
 
-const logger = pino({ level: "silent" });
+const logger = createLogger("silent");
 
 describe("processBatch", () => {
   beforeEach(async () => {

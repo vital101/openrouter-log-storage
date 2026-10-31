@@ -7,6 +7,8 @@
  * is independently testable.
  */
 
+import type { Logger } from "./logger.js";
+
 export type Handler = (req: Request, socketIp?: string | null) => Promise<Response> | Response;
 export type Middleware = (next: Handler) => Handler;
 
@@ -195,9 +197,8 @@ export function securityHeaders(): Middleware {
   };
 }
 
-export interface RequestLogger {
-  info: (obj: unknown, msg?: string) => void;
-}
+/** Narrow slice of Logger needed by request logging and error handling. */
+export type RequestLogger = Pick<Logger, "info">;
 
 /** Per-request completion log, shaped like pino-http's default output. */
 export function requestLogger(logger: RequestLogger): Middleware {
