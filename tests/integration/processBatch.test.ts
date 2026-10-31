@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { pino } from "pino";
 import { getTestDb, seedRawEvent, truncateAll } from "../fixtures/db.js";
 import { processBatch } from "../../src/worker/processBatch.js";

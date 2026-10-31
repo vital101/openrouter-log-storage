@@ -26,6 +26,24 @@ const envSchema = z.object({
 
 export type Config = z.infer<typeof envSchema>;
 
+/** Pure parse over an env snapshot. `envLoaded` toggles the .env tip in errors. */
+export function parseEnv(
+  env: Record<string, string | undefined>,
+  envLoaded: boolean = false,
+): Config {
+  const parsed = envSchema.safeParse(env);
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((i) => `${i.path.join(".")}: ${i.message}`)
+      .join("\n");
+    const tip = envLoaded
+      ? ""
+      : "\n\nTip: copy .env.example to .env and set DATABASE_URL and WEBHOOK_SECRET.";
+    throw new Error(`Invalid environment configuration:${tip}\n${issues}`);
+  }
+  return parsed.data;
+}
+
 let cached: Config | undefined;
 
 export function loadConfig(): Config {
@@ -39,16 +57,6 @@ export function loadConfig(): Config {
     // no .env file is fine
   }
 
-  const parsed = envSchema.safeParse(process.env);
-  if (!parsed.success) {
-    const issues = parsed.error.issues
-      .map((i) => `${i.path.join(".")}: ${i.message}`)
-      .join("\n");
-    const tip = envLoaded
-      ? ""
-      : "\n\nTip: copy .env.example to .env and set DATABASE_URL and WEBHOOK_SECRET.";
-    throw new Error(`Invalid environment configuration:${tip}\n${issues}`);
-  }
-  cached = parsed.data;
+  cached = parseEnv(process.env, envLoaded);
   return cached;
 }

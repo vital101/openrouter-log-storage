@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { sql } from "kysely";
 import { getTestDb, seedRawEvent, truncateAll } from "../fixtures/db.js";
 import { storeParsedTraces } from "../../src/worker/store.js";

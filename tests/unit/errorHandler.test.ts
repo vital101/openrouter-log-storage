@@ -1,11 +1,12 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, mock } from "bun:test";
 import { errorHandler } from "../../src/middleware/errorHandler.js";
 import type { Request, Response, NextFunction } from "express";
 
 function makeRes() {
-  const status = vi.fn().mockReturnThis();
-  const json = vi.fn().mockReturnThis();
-  return { res: { status, json } as unknown as Response, status, json };
+  const res = { status: mock(), json: mock() };
+  // res.status(x).json(y) chain: status returns the res object
+  res.status.mockReturnValue(res);
+  return { res: res as unknown as Response, status: res.status, json: res.json };
 }
 
 describe("errorHandler", () => {
@@ -17,8 +18,8 @@ describe("errorHandler", () => {
       res,
       {} as NextFunction,
     );
-    expect(status).toHaveBeenCalledWith(400);
-    expect(json).toHaveBeenCalledWith({ error: "invalid_json" });
+    expect(status.mock.calls[0]?.[0]).toBe(400);
+    expect(json.mock.calls[0]?.[0]).toEqual({ error: "invalid_json" });
   });
 
   it("maps status 413 to 413 payload_too_large", () => {
@@ -29,8 +30,8 @@ describe("errorHandler", () => {
       res,
       {} as NextFunction,
     );
-    expect(status).toHaveBeenCalledWith(413);
-    expect(json).toHaveBeenCalledWith({ error: "payload_too_large" });
+    expect(status.mock.calls[0]?.[0]).toBe(413);
+    expect(json.mock.calls[0]?.[0]).toEqual({ error: "payload_too_large" });
   });
 
   it("maps entity.too.large type to 413 payload_too_large", () => {
@@ -41,8 +42,8 @@ describe("errorHandler", () => {
       res,
       {} as NextFunction,
     );
-    expect(status).toHaveBeenCalledWith(413);
-    expect(json).toHaveBeenCalledWith({ error: "payload_too_large" });
+    expect(status.mock.calls[0]?.[0]).toBe(413);
+    expect(json.mock.calls[0]?.[0]).toEqual({ error: "payload_too_large" });
   });
 
   it("uses err.status for custom status codes (default body internal_error)", () => {
@@ -53,8 +54,8 @@ describe("errorHandler", () => {
       res,
       {} as NextFunction,
     );
-    expect(status).toHaveBeenCalledWith(418);
-    expect(json).toHaveBeenCalledWith({ error: "internal_error" });
+    expect(status.mock.calls[0]?.[0]).toBe(418);
+    expect(json.mock.calls[0]?.[0]).toEqual({ error: "internal_error" });
   });
 
   it("defaults to 500 internal_error for a plain Error", () => {
@@ -65,7 +66,7 @@ describe("errorHandler", () => {
       res,
       {} as NextFunction,
     );
-    expect(status).toHaveBeenCalledWith(500);
-    expect(json).toHaveBeenCalledWith({ error: "internal_error" });
+    expect(status.mock.calls[0]?.[0]).toBe(500);
+    expect(json.mock.calls[0]?.[0]).toEqual({ error: "internal_error" });
   });
 });

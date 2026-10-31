@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "bun:test";
 import request from "supertest";
 import { Kysely, PostgresDialect } from "kysely";
 import { Pool } from "pg";

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestDb, truncateAll } from "../fixtures/db.js";
 import { deleteOldRawEvents, deleteOldTraces } from "../../src/cleanup.js";
 

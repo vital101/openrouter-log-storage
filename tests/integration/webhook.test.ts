@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import request from "supertest";
 import { getTestDb, truncateAll } from "../fixtures/db.js";
 import { createTestApp } from "../fixtures/app.js";

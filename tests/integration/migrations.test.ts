@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
 import { promises as fs } from "node:fs";

@@ -1,0 +1,20 @@
+[test]
+# Default timeout. DB-touching tests that need more pass a per-test timeout arg
+# (e.g. migrations.test.ts uses 120_000). Replaces the old per-project vitest
+# timeouts, which bun's test runner has no per-directory equivalent for.
+testTimeout = 60000
+# Coverage is opt-in via `bun test --coverage` (see the test:coverage script).
+coverageReporter = ["text", "lcov"]
+# Mirrors the old vitest coverage scope: src/** minus wiring files.
+# NOTE: bun 1.4.4 accepts coverageThreshold but never enforces it, so the >=90%
+# gate lives in scripts/check-coverage.mjs.
+coveragePathIgnorePatterns = [
+  "**/tests/**",
+  "**/migrations/**",
+  "**/node_modules/**",
+  "**/src/server.ts",
+  "**/src/worker/index.ts",
+  "**/src/migrate.ts",
+  "**/src/logger.ts",
+  "**/src/types.ts",
+]

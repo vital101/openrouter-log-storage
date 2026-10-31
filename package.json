@@ -11,12 +11,12 @@
     "cleanup": "bun src/cleanup.ts",
     "migrate": "bun src/migrate.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration",
-    "test:e2e": "vitest run --project e2e"
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage && node scripts/check-coverage.mjs",
+    "test:unit": "bun test tests/unit",
+    "test:integration": "bun test tests/integration",
+    "test:e2e": "bun test tests/e2e"
   },
   "dependencies": {
     "express": "^5.3.0",
@@ -34,11 +34,10 @@
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.2.1",
-    "@vitest/coverage-v8": "^5.0.5",
+    "bun-types": "^1.4.4",
     "supertest": "^7.3.1",
     "testcontainers": "^12.2.1",
-    "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "typescript": "^7.0.2"
   },
   "trustedDependencies": [
     "esbuild",

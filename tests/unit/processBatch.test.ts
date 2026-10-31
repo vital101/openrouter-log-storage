@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { computeBackoffMs, shouldFailAfter } from "../../src/worker/processBatch.js";
 
 describe("computeBackoffMs", () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import request from "supertest";
 import { createTestApp } from "../fixtures/app.js";
 import { getTestDb } from "../fixtures/db.js";
