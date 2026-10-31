@@ -32,20 +32,21 @@ node bench/soak.mjs 120 50
 | Errors | 0 | 0 | — |
 | Test suite wall time | ~10.2 s | ~5.2 s | −49% |
 
-## 120-second sustained load (RSS in MB)
+## 120-second sustained load, clean DB (RSS in MB)
 
-Both runs: 6000 requests, 50 rps, 0 failures.
+Each run starts from a truncated DB (the database is truncated and vacuumed
+before the run). Both: 6000 requests, 50 rps, 0 failures.
 
 | Process / metric | Node 26 | Bun 1.4 | Change |
 |---|---|---|---|
-| Server RSS, first-half avg | 162.0 | 95.7 | −41% |
-| Server RSS, second-half avg | 152.2 | 98.1 | −36% |
-| Server RSS, peak | 166.3 | 108.8 | −35% |
-| Server RSS, after 30s idle | 130.2 | 76.7 | −41% |
-| Worker RSS, first-half avg | 133.0 | 95.6 | −28% |
-| Worker RSS, second-half avg | 114.3 | 108.1 | −5% |
-| Worker RSS, peak | 149.1 | 132.7 | −11% |
-| Worker RSS, after 30s idle | 113.2 | 114.4 | ~0% |
+| Server RSS, first-half avg | 170.7 | 94.5 | −45% |
+| Server RSS, second-half avg | 175.1 | 99.0 | −43% |
+| Server RSS, peak | 188.2 | 105.3 | −44% |
+| Server RSS, after 30s idle | 177.4 | 102.0 | −42% |
+| Worker RSS, first-half avg | 186.8 | 148.7 | −20% |
+| Worker RSS, second-half avg | 171.6 | 161.2 | −6% |
+| Worker RSS, peak | 208.2 | 179.6 | −14% |
+| Worker RSS, after 30s idle | 194.0 | 165.9 | −14% |
 
 ## Notes
 
@@ -61,6 +62,14 @@ Both runs: 6000 requests, 50 rps, 0 failures.
 - The worker's advantage is smaller than the server's, which is expected: it is
   Postgres-I/O bound and its RSS is dominated by batch payloads rather than
   runtime overhead.
+- An earlier 120s run was executed against a *dirty* DB left by previous
+  benchmarks (~40k pending events, all in one UTC day and one model bucket).
+  That dataset makes `storeParsedTraces`' per-trace `usage_daily` recompute
+  quadratic, so the worker fell behind and both runtimes' RSS was inflated by
+  the backlog. The table above re-measures both runtimes from a clean DB; use
+  those numbers.
+- Throughput sanity check on a clean DB: a single `processBatch` of 100 events
+  (20 spans each, concurrency 4) completes in **276 ms** under Bun.
 
 ## Raw output
 
@@ -88,22 +97,24 @@ Bun 1.4, 30s burst:
 }
 ```
 
-Node 26, 120s soak summary:
+Node 26, 120s clean-DB soak summary:
 
 ```json
 {
-  "server": { "firstHalfAvgMb": 162, "secondHalfAvgMb": 152.2, "peakMb": 166.3 },
-  "worker": { "firstHalfAvgMb": 133, "secondHalfAvgMb": 114.3, "peakMb": 149.1 },
+  "server": { "firstHalfAvgMb": 170.7, "secondHalfAvgMb": 175.1, "peakMb": 188.2 },
+  "worker": { "firstHalfAvgMb": 186.8, "secondHalfAvgMb": 171.6, "peakMb": 208.2 },
+  "idleTailLastMb": { "server": 177.4, "worker": 194 },
   "load": { "ok": 6000, "fail": 0, "elapsedSec": 120, "rps": 50 }
 }
 ```
 
-Bun 1.4, 120s soak summary:
+Bun 1.4, 120s clean-DB soak summary:
 
 ```json
 {
-  "server": { "firstHalfAvgMb": 95.7, "secondHalfAvgMb": 98.1, "peakMb": 108.8 },
-  "worker": { "firstHalfAvgMb": 95.6, "secondHalfAvgMb": 108.1, "peakMb": 132.7 },
+  "server": { "firstHalfAvgMb": 94.5, "secondHalfAvgMb": 99, "peakMb": 105.3 },
+  "worker": { "firstHalfAvgMb": 148.7, "secondHalfAvgMb": 161.2, "peakMb": 179.6 },
+  "idleTailLastMb": { "server": 102, "worker": 165.9 },
   "load": { "ok": 6000, "fail": 0, "elapsedSec": 120, "rps": 50 }
 }
 ```
