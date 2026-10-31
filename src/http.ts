@@ -296,8 +296,8 @@ export function rateLimit(options: RateLimitOptions): Middleware {
     }
 
     const res = await next(req, socketIp);
-    for (const [key, value] of Object.entries(headers)) {
-      res.headers.set(key, value);
+    for (const [headerName, headerValue] of Object.entries(headers)) {
+      res.headers.set(headerName, headerValue);
     }
     return res;
   };
