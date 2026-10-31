@@ -1,19 +1,17 @@
-FROM node:26.12.1-slim AS builder
+# Bun runs TypeScript directly, so there is no compile/bundle stage: the image
+# ships src/ + migrations/ and both processes import the .ts entrypoints.
+FROM oven/bun:1.4-slim AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY tsconfig.json tsconfig.build.json ./
-COPY src ./src
-RUN npm run build
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile --production
 
-FROM node:26.12.1-slim AS runtime
+FROM oven/bun:1.4-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-COPY --from=builder /app/dist ./dist
-COPY migrations ./migrations
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json bun.lock ./
 COPY src ./src
-USER node
+COPY migrations ./migrations
+USER bun
 EXPOSE 3000
-CMD ["node", "dist/server.js"]
+CMD ["bun", "src/server.ts"]

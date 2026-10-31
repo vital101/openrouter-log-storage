@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
@@ -49,13 +50,9 @@ let cached: Config | undefined;
 export function loadConfig(): Config {
   if (cached) return cached;
 
-  let envLoaded = false;
-  try {
-    process.loadEnvFile(path.resolve(process.cwd(), ".env"));
-    envLoaded = true;
-  } catch {
-    // no .env file is fine
-  }
+  // Bun loads .env (and .env.local / .env.<NODE_ENV>) automatically before
+  // user code runs; real environment variables always take precedence.
+  const envLoaded = existsSync(path.resolve(process.cwd(), ".env"));
 
   cached = parseEnv(process.env, envLoaded);
   return cached;

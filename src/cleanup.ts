@@ -1,5 +1,3 @@
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { sql, type Kysely } from "kysely";
 import { createDb } from "./db.js";
 import { loadConfig } from "./config.js";
@@ -95,8 +93,7 @@ async function main() {
   await db.destroy();
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
-if (isMain) {
+if (import.meta.main) {
   main().catch((err) => {
     console.error("cleanup fatal:", err);
     process.exit(1);

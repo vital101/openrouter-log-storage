@@ -111,7 +111,9 @@ async function main() {
   await db.destroy();
 }
 
-main().catch((err) => {
-  logger.error({ err }, "migrator failed");
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    logger.error({ err }, "migrator failed");
+    process.exit(1);
+  });
+}

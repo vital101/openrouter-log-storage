@@ -1,5 +1,3 @@
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type { Kysely } from "kysely";
 import type { Logger } from "../logger.js";
 import { loadConfig, type Config } from "../config.js";
@@ -103,8 +101,7 @@ async function main() {
   );
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
-if (isMain) {
+if (import.meta.main) {
   main().catch((err) => {
     console.error("worker fatal:", err);
     process.exit(1);

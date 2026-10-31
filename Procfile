@@ -1,3 +1,3 @@
-web: node dist/server.js
-worker: node dist/worker/index.js
-release: npm run migrate
+web: bun src/server.ts
+worker: bun src/worker/index.ts
+release: bun run migrate

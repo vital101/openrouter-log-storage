@@ -29,7 +29,7 @@
   },
   "cron": [
     {
-      "command": "npm run cleanup",
+      "command": "bun run cleanup",
       "schedule": "0 3 * * *"
     }
   ]

@@ -3,11 +3,12 @@
 .env
 .env.*
 node_modules
-dist
 coverage
 tests
-vitest.config.ts
+bench
+scripts
 *.log
-npm-debug.log*
 .DS_Store
 AGENTS.md
+bunfig.toml
+tsconfig.json
