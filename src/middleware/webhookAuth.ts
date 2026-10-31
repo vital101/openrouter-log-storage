@@ -1,19 +1,18 @@
 import { timingSafeEqual } from "node:crypto";
-import type { Request, Response, NextFunction } from "express";
+import { json, type Middleware } from "../http.js";
 
 export function webhookAuth(
   expectedSecret: string,
   headerName: string,
   additionalSecrets: string[] = [],
-) {
+): Middleware {
   const normalizedHeader = headerName.toLowerCase();
   const allSecrets = [expectedSecret, ...additionalSecrets];
 
-  return (req: Request, res: Response, next: NextFunction) => {
-    const provided = req.get(normalizedHeader);
+  return (next) => async (req, socketIp) => {
+    const provided = req.headers.get(normalizedHeader);
     if (!provided) {
-      res.status(401).json({ error: "missing_auth_header" });
-      return;
+      return json({ error: "missing_auth_header" }, 401);
     }
 
     const providedBuf = Buffer.from(provided, "utf8");
@@ -26,10 +25,9 @@ export function webhookAuth(
     });
 
     if (!match) {
-      res.status(401).json({ error: "invalid_auth" });
-      return;
+      return json({ error: "invalid_auth" }, 401);
     }
 
-    next();
+    return next(req, socketIp);
   };
 }

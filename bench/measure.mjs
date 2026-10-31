@@ -11,6 +11,11 @@ const PORT = Number(process.env.BENCH_PORT || 3100);
 const RPS = process.env.BENCH_RPS || "50";
 const DURATION = process.env.BENCH_DURATION || "30";
 
+// Bun runs TypeScript sources directly; the Node baseline uses the compiled
+// dist/ build produced by the last `npm run build` on the pre-migration tree.
+const SERVER_ENTRY = RUNTIME === "bun" ? "src/server.ts" : "dist/server.js";
+const WORKER_ENTRY = RUNTIME === "bun" ? "src/worker/index.ts" : "dist/worker/index.js";
+
 const launch = (entry) =>
   RUNTIME === "bun"
     ? spawn("bun", [entry], { stdio: "pipe", env: { ...process.env, PORT: String(PORT) } })
@@ -29,8 +34,8 @@ function sample(pid) {
   }
 }
 
-const server = launch("dist/server.js");
-const worker = launch("dist/worker/index.js");
+const server = launch(SERVER_ENTRY);
+const worker = launch(WORKER_ENTRY);
 let serverErr = "", workerErr = "";
 server.stderr.on("data", (d) => (serverErr += d));
 worker.stderr.on("data", (d) => (workerErr += d));

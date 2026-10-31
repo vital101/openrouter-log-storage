@@ -1,37 +1,27 @@
-import { Router } from "express";
-import rateLimit from "express-rate-limit";
 import type { Kysely } from "kysely";
+import { json, readJsonBody, type Handler } from "../http.js";
 import type { Database } from "../types.js";
 import { sanitizeJsonValue } from "../sanitize.js";
 
 const TEST_CONNECTION_HEADER = "x-test-connection";
 
-export function webhookRouter(db: Kysely<Database>, authHeaderName: string, rateLimitPerMin: number = 60) {
-  const router = Router();
+export interface WebhookOptions {
+  db: Kysely<Database>;
+  authHeaderName: string;
+  bodyLimitBytes: number;
+}
 
-  if (rateLimitPerMin > 0) {
-    router.use(
-      rateLimit({
-        windowMs: 60_000,
-        max: rateLimitPerMin,
-        standardHeaders: true,
-        legacyHeaders: false,
-        message: { error: "rate_limited" },
-        skip: (req) => req.get(TEST_CONNECTION_HEADER)?.toLowerCase() === "true",
-      }),
-    );
-  }
+export function webhookHandler(options: WebhookOptions): Handler {
+  const { db, authHeaderName, bodyLimitBytes } = options;
 
-  router.post("/webhook/openrouter", async (req, res) => {
-    if (req.get(TEST_CONNECTION_HEADER)?.toLowerCase() === "true") {
-      res.status(200).json({ ok: true, test: true });
-      return;
+  return async (req) => {
+    if (req.headers.get(TEST_CONNECTION_HEADER)?.toLowerCase() === "true") {
+      return json({ ok: true, test: true });
     }
 
-    const payload = req.body;
+    const payload = await readJsonBody(req, bodyLimitBytes);
     if (payload == null || typeof payload !== "object" || Array.isArray(payload)) {
-      res.status(400).json({ error: "invalid_payload" });
-      return;
+      return json({ error: "invalid_payload" }, 400);
     }
 
     const result = await db
@@ -43,8 +33,6 @@ export function webhookRouter(db: Kysely<Database>, authHeaderName: string, rate
       .returning("id")
       .executeTakeFirstOrThrow();
 
-    res.status(200).json({ ok: true, id: Number(result.id) });
-  });
-
-  return router;
+    return json({ ok: true, id: Number(result.id) });
+  };
 }

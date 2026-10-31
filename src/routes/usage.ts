@@ -1,5 +1,5 @@
-import { Router } from "express";
 import { sql, type Kysely } from "kysely";
+import { html, type Handler } from "../http.js";
 import type { Database } from "../types.js";
 
 interface DailyRow {
@@ -527,11 +527,10 @@ function renderUsagePage(
 </html>`;
 }
 
-export function usageRouter(db: Kysely<Database>, retentionDays: number) {
-  const router = Router();
-
-  router.get("/usage", async (req, res) => {
-    const days = clampDays(req.query.days, retentionDays);
+export function usageHandler(db: Kysely<Database>, retentionDays: number): Handler {
+  return async (req) => {
+    const { searchParams } = new URL(req.url);
+    const days = clampDays(searchParams.get("days") ?? undefined, retentionDays);
     try {
       const daily = await sql<DailyRow>`
         SELECT
@@ -598,28 +597,21 @@ export function usageRouter(db: Kysely<Database>, retentionDays: number) {
         cost: v.cost,
       }));
 
-      res
-        .setHeader("Content-Type", "text/html; charset=utf-8")
-        .setHeader(
-          "Content-Security-Policy",
-          "default-src 'none'; style-src 'unsafe-inline'",
-        )
-        .send(
-          renderUsagePage(
-            models,
-            dayTotals,
-            heatmap.rows,
-            topCalls.rows,
-            days,
-          ),
-        );
+      return html(
+        renderUsagePage(
+          models,
+          dayTotals,
+          heatmap.rows,
+          topCalls.rows,
+          days,
+        ),
+        200,
+        {
+          "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        },
+      );
     } catch {
-      res
-        .status(500)
-        .setHeader("Content-Type", "text/html; charset=utf-8")
-        .send("<h1>Error</h1><p>Failed to load usage data.</p>");
+      return html("<h1>Error</h1><p>Failed to load usage data.</p>", 500);
     }
-  });
-
-  return router;
+  };
 }

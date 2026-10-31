@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import request from "supertest";
 import { getTestDb, truncateAll } from "../fixtures/db.js";
 import { createTestApp } from "../fixtures/app.js";
+import { call } from "../fixtures/http.js";
 import type { Config } from "../../src/config.js";
 
 const SECRET = "test-secret";
@@ -49,32 +49,34 @@ describe("POST /webhook/openrouter", () => {
 
   it("rejects requests with a missing auth header", async () => {
     const app = createTestApp({ db: getTestDb(), config });
-    const res = await request(app)
-      .post("/webhook/openrouter")
-      .send({ resourceSpans: [] });
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      json: { resourceSpans: [] },
+    });
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "missing_auth_header" });
+    expect(await res.json()).toEqual({ error: "missing_auth_header" });
   });
 
   it("rejects requests with a wrong auth header", async () => {
     const app = createTestApp({ db: getTestDb(), config });
-    const res = await request(app)
-      .post("/webhook/openrouter")
-      .set(HEADER, "wrong")
-      .send({ resourceSpans: [] });
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: "wrong" },
+      json: { resourceSpans: [] },
+    });
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "invalid_auth" });
+    expect(await res.json()).toEqual({ error: "invalid_auth" });
   });
 
   it("short-circuits with x-test-connection: true and writes no row", async () => {
     const app = createTestApp({ db: getTestDb(), config });
-    const res = await request(app)
-      .post("/webhook/openrouter")
-      .set(HEADER, SECRET)
-      .set("x-test-connection", "true")
-      .send({ resourceSpans: [] });
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET, "x-test-connection": "true" },
+      json: { resourceSpans: [] },
+    });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, test: true });
+    expect(await res.json()).toEqual({ ok: true, test: true });
 
     const db = getTestDb();
     const rows = await db.selectFrom("raw_events").selectAll().execute();
@@ -84,19 +86,21 @@ describe("POST /webhook/openrouter", () => {
   it("accepts a valid object body, persists a row, and returns its id", async () => {
     const app = createTestApp({ db: getTestDb(), config });
     const body = { resourceSpans: [] };
-    const res = await request(app)
-      .post("/webhook/openrouter")
-      .set(HEADER, SECRET)
-      .send(body);
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET },
+      json: body,
+    });
     expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
-    expect(typeof res.body.id).toBe("number");
+    const parsed = (await res.json()) as { ok: boolean; id: number };
+    expect(parsed.ok).toBe(true);
+    expect(typeof parsed.id).toBe("number");
 
     const db = getTestDb();
     const row = await db
       .selectFrom("raw_events")
       .selectAll()
-      .where("id", "=", Number(res.body.id))
+      .where("id", "=", Number(parsed.id))
       .executeTakeFirstOrThrow();
     expect(row.payload).toEqual(body);
     expect(row.auth_header_name).toBe(HEADER);
@@ -105,24 +109,35 @@ describe("POST /webhook/openrouter", () => {
 
   it("rejects an array body with 400 invalid_payload", async () => {
     const app = createTestApp({ db: getTestDb(), config });
-    const res = await request(app)
-      .post("/webhook/openrouter")
-      .set(HEADER, SECRET)
-      .set("Content-Type", "application/json")
-      .send([1, 2, 3]);
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET },
+      json: [1, 2, 3],
+    });
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: "invalid_payload" });
+    expect(await res.json()).toEqual({ error: "invalid_payload" });
   });
 
   it("rejects malformed JSON with 400 invalid_json", async () => {
     const app = createTestApp({ db: getTestDb(), config });
-    const res = await request(app)
-      .post("/webhook/openrouter")
-      .set(HEADER, SECRET)
-      .set("Content-Type", "application/json")
-      .send("{ not valid");
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET, "content-type": "application/json" },
+      body: "{ not valid",
+    });
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: "invalid_json" });
+    expect(await res.json()).toEqual({ error: "invalid_json" });
+  });
+
+  it("rejects primitive JSON bodies with 400 invalid_json (strict mode)", async () => {
+    const app = createTestApp({ db: getTestDb(), config });
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET, "content-type": "application/json" },
+      body: '"just a string"',
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_json" });
   });
 
   it("rejects oversized bodies with 413 payload_too_large", async () => {
@@ -133,12 +148,13 @@ describe("POST /webhook/openrouter", () => {
     });
     const app = createTestApp({ db: getTestDb(), config: small });
     const big = { x: "a".repeat(200) };
-    const res = await request(app)
-      .post("/webhook/openrouter")
-      .set(HEADER, SECRET)
-      .send(big);
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET },
+      json: big,
+    });
     expect(res.status).toBe(413);
-    expect(res.body).toEqual({ error: "payload_too_large" });
+    expect(await res.json()).toEqual({ error: "payload_too_large" });
   });
 
   it("sanitizes unicode that Postgres cannot store before persisting", async () => {
@@ -146,17 +162,19 @@ describe("POST /webhook/openrouter", () => {
     const body = JSON.parse(
       '{"text":"a\\u0000b","lone":"\\ud800"}',
     ) as Record<string, unknown>;
-    const res = await request(app)
-      .post("/webhook/openrouter")
-      .set(HEADER, SECRET)
-      .send(body);
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET },
+      json: body,
+    });
     expect(res.status).toBe(200);
 
     const db = getTestDb();
+    const parsed = (await res.json()) as { id: number };
     const row = await db
       .selectFrom("raw_events")
       .select(["payload"])
-      .where("id", "=", Number(res.body.id))
+      .where("id", "=", Number(parsed.id))
       .executeTakeFirstOrThrow();
     expect(row.payload).toEqual({ text: "a\uFFFDb", lone: "\uFFFD" });
   });
@@ -167,18 +185,88 @@ describe("POST /webhook/openrouter", () => {
       WEBHOOK_SECRET_HEADER: "X-Custom-Auth",
     });
     const app = createTestApp({ db: getTestDb(), config: custom });
-    const res = await request(app)
-      .post("/webhook/openrouter")
-      .set("X-Custom-Auth", SECRET)
-      .send({ hello: "world" });
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { "X-Custom-Auth": SECRET },
+      json: { hello: "world" },
+    });
     expect(res.status).toBe(200);
 
     const db = getTestDb();
+    const parsed = (await res.json()) as { id: number };
     const row = await db
       .selectFrom("raw_events")
       .select(["auth_header_name", "payload"])
-      .where("id", "=", Number(res.body.id))
+      .where("id", "=", Number(parsed.id))
       .executeTakeFirstOrThrow();
     expect(row.auth_header_name).toBe("X-Custom-Auth");
+  });
+
+  it("accepts a request with a valid rotated secret", async () => {
+    const rotated = buildConfig({
+      WEBHOOK_SECRET: SECRET,
+      WEBHOOK_SECRETS: "old-secret,new-secret",
+    });
+    const app = createTestApp({ db: getTestDb(), config: rotated });
+    const res = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: "new-secret" },
+      json: { ok: 1 },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("rate-limits after the configured number of requests per minute", async () => {
+    const limited = buildConfig({ WEBHOOK_RATE_LIMIT_PER_MIN: 2 });
+    const app = createTestApp({ db: getTestDb(), config: limited });
+
+    const first = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET, "x-forwarded-for": "10.0.0.1" },
+      json: { n: 1 },
+    });
+    expect(first.status).toBe(200);
+    expect(first.headers.get("ratelimit-limit")).toBe("2");
+
+    const second = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET, "x-forwarded-for": "10.0.0.1" },
+      json: { n: 2 },
+    });
+    expect(second.status).toBe(200);
+
+    const third = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET, "x-forwarded-for": "10.0.0.1" },
+      json: { n: 3 },
+    });
+    expect(third.status).toBe(429);
+    expect(await third.json()).toEqual({ error: "rate_limited" });
+
+    // A different client is unaffected.
+    const other = await call(app, "/webhook/openrouter", {
+      method: "POST",
+      headers: { [HEADER]: SECRET, "x-forwarded-for": "10.0.0.2" },
+      json: { n: 4 },
+    });
+    expect(other.status).toBe(200);
+  });
+
+  it("exempts x-test-connection probes from rate limiting", async () => {
+    const limited = buildConfig({ WEBHOOK_RATE_LIMIT_PER_MIN: 1 });
+    const app = createTestApp({ db: getTestDb(), config: limited });
+
+    for (let i = 0; i < 5; i++) {
+      const res = await call(app, "/webhook/openrouter", {
+        method: "POST",
+        headers: {
+          [HEADER]: SECRET,
+          "x-test-connection": "true",
+          "x-forwarded-for": "10.0.0.3",
+        },
+        json: {},
+      });
+      expect(res.status).toBe(200);
+    }
   });
 });

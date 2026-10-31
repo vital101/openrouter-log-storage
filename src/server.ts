@@ -1,46 +1,86 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import express, { type Express } from "express";
-import helmet from "helmet";
-import { pinoHttp } from "pino-http";
 import type { Logger } from "pino";
 import type { Kysely } from "kysely";
 import { loadConfig, type Config } from "./config.js";
 import { createDb, waitForDb } from "./db.js";
 import { createLogger } from "./logger.js";
-import { healthRouter } from "./routes/health.js";
-import { usageRouter } from "./routes/usage.js";
-import { webhookRouter } from "./routes/webhook.js";
+import { healthHandler } from "./routes/health.js";
+import { usageHandler } from "./routes/usage.js";
+import { webhookHandler } from "./routes/webhook.js";
 import { webhookAuth } from "./middleware/webhookAuth.js";
-import { errorHandler } from "./middleware/errorHandler.js";
+import {
+  compose,
+  errorHandler,
+  parseByteSize,
+  rateLimit,
+  requestLogger,
+  router,
+  securityHeaders,
+  type Handler,
+} from "./http.js";
 import type { Database } from "./types.js";
 
+const TEST_CONNECTION_HEADER = "x-test-connection";
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+/** Bun's default idleTimeout is 10s, which would cut off slow large uploads. */
+export const SERVE_IDLE_TIMEOUT_SECONDS = 60;
+/** Extra headroom so readJsonBody's JSON 413 wins over Bun's plain-text one. */
+const MAX_BODY_BACKSTOP_SLACK_BYTES = 1_000_000;
+
+export function maxRequestBodySizeFor(config: Config): number {
+  return parseByteSize(config.WEBHOOK_BODY_LIMIT) + MAX_BODY_BACKSTOP_SLACK_BYTES;
+}
+
+/**
+ * Build the request handler. No socket is bound here, so tests can call it
+ * directly with a `Request`. `main()` wraps this in `Bun.serve`.
+ */
 export function createApp(
   db: Kysely<Database>,
   config: Config,
   logger: Logger,
-): Express {
-  const app = express();
-  app.disable("x-powered-by");
-  app.set("trust proxy", 1);
-  app.use(helmet());
-  app.use(pinoHttp({ logger }));
-  app.use(express.json({ limit: config.WEBHOOK_BODY_LIMIT }));
-
-  app.use(healthRouter(db));
-  app.use(usageRouter(db, config.TRACES_RETENTION_DAYS));
-
+): Handler {
   const extraSecrets = config.WEBHOOK_SECRETS
     ? config.WEBHOOK_SECRETS.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
-  app.use(
+
+  const webhook = compose(
     webhookAuth(config.WEBHOOK_SECRET, config.WEBHOOK_SECRET_HEADER, extraSecrets),
-    webhookRouter(db, config.WEBHOOK_SECRET_HEADER, config.WEBHOOK_RATE_LIMIT_PER_MIN),
+    ...(config.WEBHOOK_RATE_LIMIT_PER_MIN > 0
+      ? [
+          rateLimit({
+            windowMs: RATE_LIMIT_WINDOW_MS,
+            max: config.WEBHOOK_RATE_LIMIT_PER_MIN,
+            skip: (req) =>
+              req.headers.get(TEST_CONNECTION_HEADER)?.toLowerCase() === "true",
+          }),
+        ]
+      : []),
+  )(
+    webhookHandler({
+      db,
+      authHeaderName: config.WEBHOOK_SECRET_HEADER,
+      bodyLimitBytes: parseByteSize(config.WEBHOOK_BODY_LIMIT),
+    }),
   );
 
-  app.use(errorHandler);
+  const dispatch = router([
+    { method: "GET", path: "/healthz", handler: healthHandler(db) },
+    {
+      method: "GET",
+      path: "/usage",
+      handler: usageHandler(db, config.TRACES_RETENTION_DAYS),
+    },
+    { method: "POST", path: "/webhook/openrouter", handler: webhook },
+  ]);
 
-  return app;
+  return compose(
+    securityHeaders(),
+    requestLogger(logger),
+    errorHandler(logger),
+  )(dispatch);
 }
 
 async function main() {
@@ -53,30 +93,52 @@ async function main() {
 
   const app = createApp(db, config, logger);
 
-  const server = app.listen(config.PORT, () => {
-    logger.info({ port: config.PORT }, "server listening");
+  const server = Bun.serve({
+    port: config.PORT,
+    idleTimeout: SERVE_IDLE_TIMEOUT_SECONDS,
+    // Backstop only: readJsonBody enforces WEBHOOK_BODY_LIMIT and returns the
+    // JSON payload_too_large error before Bun's limit can trigger.
+    maxRequestBodySize: maxRequestBodySizeFor(config),
+    fetch(request, srv) {
+      return app(request, srv.requestIP(request)?.address ?? null);
+    },
+    error(err) {
+      logger.error({ err }, "server error");
+      return new Response(JSON.stringify({ error: "internal_error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      });
+    },
   });
 
-  const shutdown = (signal: string) => {
+  logger.info({ port: server.port }, "server listening");
+
+  const shutdown = async (signal: string) => {
     logger.info({ signal }, "shutdown started");
-    server.close((err) => {
-      if (err) logger.error({ err }, "server close error");
-      void db
-        .destroy()
-        .catch((err) => logger.error({ err }, "db destroy error"))
-        .finally(() => {
-          logger.info("shutdown complete");
-          process.exit(0);
-        });
-    });
     setTimeout(() => {
       logger.warn("force-exit after timeout");
       process.exit(1);
     }, 10_000).unref();
+
+    try {
+      // Graceful: stop accepting new connections, wait for in-flight requests.
+      await server.stop();
+    } catch (err) {
+      logger.error({ err }, "server close error");
+    }
+
+    try {
+      await db.destroy();
+    } catch (err) {
+      logger.error({ err }, "db destroy error");
+    }
+
+    logger.info("shutdown complete");
+    process.exit(0);
   };
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;

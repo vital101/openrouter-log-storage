@@ -1,7 +1,7 @@
-import type { Express } from "express";
 import { pino } from "pino";
 import type { Kysely } from "kysely";
 import { createApp } from "../../src/server.js";
+import type { Handler } from "../../src/http.js";
 import type { Database } from "../../src/types.js";
 import type { Config } from "../../src/config.js";
 
@@ -31,7 +31,7 @@ export interface TestAppOptions {
   db: Kysely<Database>;
 }
 
-export function createTestApp(opts: TestAppOptions): Express {
+export function createTestApp(opts: TestAppOptions): Handler {
   const config: Config = { ...DEFAULT_CONFIG, ...opts.config };
   const logger = pino({ level: "silent" });
   return createApp(opts.db, config, logger);

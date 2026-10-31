@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import request from "supertest";
 import { pino } from "pino";
 import { getTestDb, truncateAll } from "../fixtures/db.js";
 import { createTestApp } from "../fixtures/app.js";
+import { call } from "../fixtures/http.js";
 import { startWorkerLoop } from "../../src/worker/index.js";
 import { makeMinimalValidOtel, makeOtelPayload, makeResourceSpan, makeScopeSpan, makeSpan, makeStringAttr } from "../fixtures/otel_payloads.js";
 import type { Config } from "../../src/config.js";
@@ -46,13 +46,15 @@ describe("server + worker e2e", () => {
 
     try {
       const payload = makeMinimalValidOtel();
-      const res = await request(app)
-        .post("/webhook/openrouter")
-        .set(HEADER, SECRET)
-        .send(payload);
+      const res = await call(app, "/webhook/openrouter", {
+        method: "POST",
+        headers: { [HEADER]: SECRET },
+        json: payload,
+      });
       expect(res.status).toBe(200);
-      expect(res.body.ok).toBe(true);
-      const rawEventId = Number(res.body.id);
+      const body = (await res.json()) as { ok: boolean; id: number };
+      expect(body.ok).toBe(true);
+      const rawEventId = Number(body.id);
 
       await worker.tick();
 
@@ -92,10 +94,11 @@ describe("server + worker e2e", () => {
     const worker = startWorkerLoop({ db, logger, config: TEST_CONFIG });
 
     try {
-      const res = await request(app)
-        .post("/webhook/openrouter")
-        .set(HEADER, "wrong")
-        .send(makeMinimalValidOtel());
+      const res = await call(app, "/webhook/openrouter", {
+        method: "POST",
+        headers: { [HEADER]: "wrong" },
+        json: makeMinimalValidOtel(),
+      });
       expect(res.status).toBe(401);
 
       await worker.tick();
@@ -138,10 +141,11 @@ describe("server + worker e2e", () => {
           }),
         ],
       });
-      const res1 = await request(app)
-        .post("/webhook/openrouter")
-        .set(HEADER, SECRET)
-        .send(full);
+      const res1 = await call(app, "/webhook/openrouter", {
+        method: "POST",
+        headers: { [HEADER]: SECRET },
+        json: full,
+      });
       expect(res1.status).toBe(200);
       await worker.tick();
 
@@ -160,10 +164,11 @@ describe("server + worker e2e", () => {
           }),
         ],
       });
-      const res2 = await request(app)
-        .post("/webhook/openrouter")
-        .set(HEADER, SECRET)
-        .send(partial);
+      const res2 = await call(app, "/webhook/openrouter", {
+        method: "POST",
+        headers: { [HEADER]: SECRET },
+        json: partial,
+      });
       expect(res2.status).toBe(200);
       await worker.tick();
 

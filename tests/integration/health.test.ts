@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import request from "supertest";
 import { createTestApp } from "../fixtures/app.js";
+import { call } from "../fixtures/http.js";
 import { getTestDb } from "../fixtures/db.js";
 import type { Config } from "../../src/config.js";
 import { Kysely, PostgresDialect } from "kysely";
@@ -31,12 +31,12 @@ const TEST_CONFIG: Config = {
 describe("GET /healthz", () => {
   it("returns 200 {status:ok} when the database responds", async () => {
     const app = createTestApp({ db: getTestDb(), config: TEST_CONFIG });
-    const res = await request(app).get("/healthz");
+    const res = await call(app, "/healthz");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: "ok" });
+    expect(await res.json()).toEqual({ status: "ok" });
   });
 
-  it("returns 503 {status:down,error} when the database is unreachable", async () => {
+  it("returns 503 {status:down} when the database is unreachable", async () => {
     const badDb = new Kysely<Database>({
       dialect: new PostgresDialect({
         pool: new Pool({
@@ -47,10 +47,17 @@ describe("GET /healthz", () => {
       }),
     });
     const app = createTestApp({ db: badDb, config: TEST_CONFIG });
-    const res = await request(app).get("/healthz");
+    const res = await call(app, "/healthz");
     expect(res.status).toBe(503);
-    expect(res.body.status).toBe("down");
-    expect(res.body.error).toBeUndefined();
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.status).toBe("down");
+    expect(body.error).toBeUndefined();
     await badDb.destroy();
+  });
+
+  it("returns 404 for an unknown path", async () => {
+    const app = createTestApp({ db: getTestDb(), config: TEST_CONFIG });
+    const res = await call(app, "/nope");
+    expect(res.status).toBe(404);
   });
 });

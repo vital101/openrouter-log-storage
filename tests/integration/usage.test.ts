@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import request from "supertest";
 import { Kysely, PostgresDialect } from "kysely";
 import { Pool } from "pg";
 import { getTestDb, truncateAll } from "../fixtures/db.js";
 import { createTestApp } from "../fixtures/app.js";
+import { get } from "../fixtures/http.js";
 import type { Database } from "../../src/types.js";
 
 async function seedUsageDaily(opts: {
@@ -125,11 +125,11 @@ describe("GET /usage", () => {
     });
 
     const app = createTestApp({ db: getTestDb() });
-    const res = await request(app).get("/usage");
+    const res = await get(app, "/usage");
 
     expect(res.status).toBe(200);
-    expect(res.headers["content-type"]).toMatch(/text\/html/);
-    expect(res.headers["content-security-policy"]).toContain("style-src 'unsafe-inline'");
+    expect(res.headers.get("content-type")).toMatch(/text\/html/);
+    expect(res.headers.get("content-security-policy")).toContain("style-src 'unsafe-inline'");
     expect(res.text).toContain("OpenRouter Usage");
     expect(res.text).toContain("Total calls");
     expect(res.text).toContain("Daily trend");
@@ -154,7 +154,7 @@ describe("GET /usage", () => {
     });
 
     const app = createTestApp({ db: getTestDb() });
-    const res = await request(app).get("/usage");
+    const res = await get(app, "/usage");
 
     expect(res.status).toBe(200);
     expect(res.text).not.toContain("ancient-model");
@@ -166,25 +166,25 @@ describe("GET /usage", () => {
 
     const app = createTestApp({ db: getTestDb() });
 
-    const narrow = await request(app).get("/usage?days=30");
+    const narrow = await get(app, "/usage?days=30");
     expect(narrow.text).not.toContain("old-model");
 
-    const wide = await request(app).get("/usage?days=90");
+    const wide = await get(app, "/usage?days=90");
     expect(wide.text).toContain("old-model");
   });
 
   it("clamps ?days to 1..90 and falls back on garbage input", async () => {
     const app = createTestApp({ db: getTestDb() });
 
-    const high = await request(app).get("/usage?days=999");
+    const high = await get(app, "/usage?days=999");
     expect(high.status).toBe(200);
     expect(high.text).toContain("last 90 days");
 
-    const low = await request(app).get("/usage?days=0");
+    const low = await get(app, "/usage?days=0");
     expect(low.status).toBe(200);
     expect(low.text).toContain("last 1 days");
 
-    const garbage = await request(app).get("/usage?days=abc");
+    const garbage = await get(app, "/usage?days=abc");
     expect(garbage.status).toBe(200);
     expect(garbage.text).toContain("last 30 days");
   });
@@ -195,7 +195,7 @@ describe("GET /usage", () => {
     await seedUsageDaily({ day: day1, model: "model-high", totalCost: 9 });
 
     const app = createTestApp({ db: getTestDb() });
-    const res = await request(app).get("/usage");
+    const res = await get(app, "/usage");
 
     expect(res.text.indexOf("model-high")).toBeLessThan(
       res.text.indexOf("model-low"),
@@ -214,7 +214,7 @@ describe("GET /usage", () => {
     });
 
     const app = createTestApp({ db: getTestDb() });
-    const res = await request(app).get("/usage");
+    const res = await get(app, "/usage");
 
     expect(res.text).toContain("Outcomes");
     expect(res.text).toContain("length");
@@ -231,7 +231,7 @@ describe("GET /usage", () => {
       .execute();
 
     const app = createTestApp({ db });
-    const res = await request(app).get("/usage");
+    const res = await get(app, "/usage");
 
     expect(res.status).toBe(200);
     expect(res.text).toContain("Activity by hour");
@@ -244,7 +244,7 @@ describe("GET /usage", () => {
     await seedTopCall({ model: "ancient-cost-model", cost: 99, daysAgo: 60 });
 
     const app = createTestApp({ db: getTestDb() });
-    const res = await request(app).get("/usage");
+    const res = await get(app, "/usage");
 
     expect(res.status).toBe(200);
     expect(res.text).toContain("Most expensive calls");
@@ -258,7 +258,7 @@ describe("GET /usage", () => {
 
   it("handles an empty table", async () => {
     const app = createTestApp({ db: getTestDb() });
-    const res = await request(app).get("/usage");
+    const res = await get(app, "/usage");
     expect(res.status).toBe(200);
     expect(res.text).toContain("OpenRouter Usage");
     expect(res.text).toContain("$0.0000");
@@ -272,7 +272,7 @@ describe("GET /usage", () => {
     });
 
     const app = createTestApp({ db: getTestDb() });
-    const res = await request(app).get("/usage");
+    const res = await get(app, "/usage");
 
     expect(res.text).not.toContain("<script>alert(1)</script>");
     expect(res.text).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
@@ -289,7 +289,7 @@ describe("GET /usage", () => {
       }),
     });
     const app = createTestApp({ db: badDb });
-    const res = await request(app).get("/usage");
+    const res = await get(app, "/usage");
     expect(res.status).toBe(500);
     expect(res.text).toContain("Error");
     await badDb.destroy();
